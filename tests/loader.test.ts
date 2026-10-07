@@ -23,7 +23,8 @@ test("catalog sorts files, supports uppercase and spaces, ignores symlinks and r
     const photos = await loadPhotos();
     assert.deepEqual(photos.map(p => p.filename), ["equal.png", "newer image.webp", "older.JPG"]);
     assert.equal(photos[1].id, photoId("newer image.webp"));
-    assert.equal(photos[1].thumbnailUrl, photos[1].originalUrl);
+    assert.match(photos[1].thumbnailUrl, /size=small$/);
+    assert.match(photos[1].originalUrl, /size=original$/);
     assert.equal(photos[2].takenAt, "2004-01-01T00:00:00.000Z");
     assert.equal(await openPhoto("../../outside.jpg"), null);
     assert.equal(await openPhoto(photoId("link.jpg")), null);

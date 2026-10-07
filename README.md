@@ -46,9 +46,82 @@ the scan for five seconds. Reload the page to pick up directory changes after
 that interval. If the directory is empty or unreadable, the UI offers a reload
 or retry action. The filesystem path is not included in public metadata.
 
-`GET /api/photos/[id]` streams a cataloged image through an opaque stable ID,
-sets its MIME type, and supports ETag revalidation. No arbitrary filesystem
-path is accepted. A file deleted after scanning returns 404.
+`GET /api/photos/[id]?size=small|medium|large|original` serves a cataloged image
+through an opaque stable ID. Omitting size streams the original for compatibility.
+Variants use WebP; originals retain their MIME type. Both support ETag
+revalidation. No arbitrary filesystem path or resize dimension is accepted.
+A file deleted after scanning returns 404; unsupported size values return 400.
+
+## Adaptive image resolution
+
+The Photo model still has the same five fields. `thumbnailUrl` points to the
+small variant and `originalUrl` to `size=original`. Cards select a variant using
+relative depth; captions and date selection still come from the original files.
+The lightbox and Open original action always use the original.
+
+| Tier | Target width | Enter while approaching | Start preloading | Retain while retreating |
+| --- | --- | --- | --- | --- |
+| Small | 320px | relativeZ > 2000 | normal lazy image loading | medium returns to small above 2400 |
+| Medium | 800px | relativeZ <= 2000 | relativeZ <= 2400 | through relativeZ 2400 |
+| Large | 1600px | relativeZ <= 400 | relativeZ <= 800 | through relativeZ 800 |
+
+Upgrades and downgrades keep the current image displayed until the requested
+replacement loads and decodes. Nearby cards hold at most one decoded speculative
+variant; distant cards don't preload large images. The shared client queue caps
+preload/upgrade requests at three, prioritizes required replacements, and
+cancels abandoned requests. Threshold hysteresis avoids switching repeatedly
+when scrolling back and forth around a boundary. Failed upgrades retain the
+current image. A failed speculative load may retry once when required; failed
+required upgrades are retried after the card remounts. Initial variant failures
+fall back to a small variant, then to the original, so readable photos remain
+available if resizing is unavailable.
+
+Sharp 0.35.5 generates variants on demand using Lanczos3, aspect-ratio-preserving
+width-only resizing, EXIF auto-orientation, no enlargement, and WebP quality 90
+with smart subsampling and effort 4. Smaller originals remain smaller. Generated
+files contain rendered pixels rather than copied EXIF metadata; originals and
+their EXIF bytes are never rewritten. Original mtime is unchanged.
+
+The default disk cache is `.photo-cache/` in the application working directory:
+
+```text
+.photo-cache/
+  v1-webp90-lanczos3-oriented-0.35.5/
+    <hash-of-photo-directory>/
+      <photo-id>/
+        <source-revision>/
+          small.webp
+          medium.webp
+          large.webp
+```
+
+Set `PHOTO_CACHE_DIRECTORY` to an absolute writable path outside PHOTO_DIRECTORY
+to override the root. Symlink resolution is checked to prevent storing variants
+inside the originals directory. Cache files are excluded from Git and public/;
+they are delivered only through cataloged IDs. Temporary files are atomically
+renamed after generation and source verification completes. Concurrent identical
+requests share generation within a server process; subsequent requests and
+server restarts reuse complete disk entries. Two resize jobs can run at once,
+with at most 64 waiting distinct jobs. Sharp uses two worker threads per job and
+a 32 MiB libvips operation cache. Streamed input can still be buffered internally
+by Sharp; encoded input is capped at 64 MiB and decoded input at 80 million
+pixels. Oversized or malformed inputs retain their original-image fallback.
+
+The source revision uses device/inode, size, precise mtime, and ctime. These are
+included in the cache key and browser URL, covering replacement even when mtime
+and size are preserved. Each request rechecks live source metadata; sources
+that change while generating aren't published as a usable variant. Recipe and
+Sharp version are also part of the cache namespace. The existing five-second
+metadata catalog cache remains; refresh after that interval to get new image
+URLs after a source change. Browser responses are privately cached for five
+minutes with ETags, so already-open cards aren't automatically refreshed.
+
+Old revision entries are no longer selected, but are retained on disk. There is
+no automatic disk quota or age eviction in this implementation. The cache may
+be deleted while the application is stopped; needed variants regenerate. Disk
+cache writes require permission and available space. Adaptive resolution leaves
+card size, clipping, overlap, transforms, passing fades, and navigation unchanged;
+image quality still depends on the source, display density, and browser sampling.
 
 ## Controls
 
@@ -104,7 +177,7 @@ containment and the previous control receives focus after closing.
   size, while chronology alone determines Z.
 - Only a window of five passed and 25 upcoming indices, plus the current index,
   is considered (at most 31 slots; passed cards beyond the cutoff are absent).
-  Original images are lazy loaded at distant depths. The full metadata catalog
+  Small variants are lazy loaded at distant depths. The full metadata catalog
   remains in memory.
 - `PhotoModal`: isolated browser viewing behavior for possible future native
   integration; original viewing does not launch a Windows application.
@@ -156,9 +229,9 @@ mock catalog.
   diagnostics. No capture date is invented or files dropped.
 - Defensive EXIF read limits can skip metadata in unusually large or fragmented
   containers; these photos still use filesystem date fallbacks.
-- `thumbnailUrl` and `originalUrl` intentionally use the same endpoint. Full
-  images can be bandwidth- and decoding-heavy; cached thumbnail generation is
-  the next optimization and no Sharp-based pipeline is required.
+- Distance-adaptive variants reduce image bandwidth and decoding costs. First
+  requests pay generation time; current images remain visible during upgrades.
+  The original-image fallback can be expensive when resizing is unavailable.
 - Overlap avoidance reduces local clustering but is not a collision-free
   layout. Cards enlarge beyond the viewport as you pass them intentionally.
   A partially or completely occluded card becomes easier to select as you move.
@@ -300,6 +373,7 @@ Linux/filesystem limitations:
   interfere with another running importer. Successfully published photos are
   complete; a source left after a crash is rechecked on restart.
 - There is no persistent hash index for identical images under unrelated names,
-  systemd service, import history database, automatic UI refresh, or thumbnail
-  pipeline. After imports, refresh the viewer after its five-second catalog
+  systemd service, import history database, or automatic UI refresh. Image variants
+  are generated on demand by the viewer, not by the importer. After imports,
+  refresh the viewer after its five-second catalog
   cache expires. Very long filenames may not allow an added collision suffix.

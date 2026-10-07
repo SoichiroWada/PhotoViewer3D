@@ -1,7 +1,26 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Dependencies / Next.js
 node_modules/
 .next/
-.env*
-!.env.example
-*.tsbuildinfo
+
+# Local photo directories
+PhotoIncoming/
+Photos/
+
+# Generated caches
+thumbnail-cache/
+cache/
+.photo-cache/
+
+# Logs / test output
+*.log
 playwright-report/
 test-results/
+
+# TypeScript build info
+*.tsbuildinfo

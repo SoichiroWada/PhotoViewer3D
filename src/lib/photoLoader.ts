@@ -5,6 +5,7 @@ import { open, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Photo } from "@/types/photo";
 import { photoDateReader, type PhotoDateSelection } from "./photoDate";
+import { photoRevision } from "./photoRevision";
 
 const formats: Record<string, string> = {
   ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -34,14 +35,13 @@ async function scan(directory: string): Promise<Catalog> {
         const info = await stat(filePath);
         const dateSelection = await photoDateReader.read(filePath, info);
         const id = photoId(entry.name);
-        // Version URLs by mtime and size so replacing an image refreshes the cache.
-        const url = `/api/photos/${id}?v=${Math.trunc(info.mtimeMs)}-${info.size}`;
+        const url = `/api/photos/${id}?v=${photoRevision(info)}`;
         return {
           filePath,
           dateSelection,
           contentType: formats[path.extname(entry.name).toLowerCase()],
           photo: {
-            id, filename: entry.name, thumbnailUrl: url, originalUrl: url,
+            id, filename: entry.name, thumbnailUrl: `${url}&size=small`, originalUrl: `${url}&size=original`,
             takenAt: dateSelection.takenAt,
           },
         } satisfies Entry;
@@ -100,7 +100,7 @@ export async function openPhoto(id: string) {
     const handle = await open(entry.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await handle.stat();
     if (!info.isFile()) { await handle.close(); return null; }
-    return { handle, info, contentType: entry.contentType };
+    return { handle, info, root, contentType: entry.contentType };
   } catch (error) {
     if (["ENOENT", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
     throw error;

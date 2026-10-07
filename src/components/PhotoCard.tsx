@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import type { Photo } from "@/types/photo";
-import { DEPTH_SPACING, photoDepth, type Position } from "@/lib/photoPosition";
+import { photoDepth, type Position } from "@/lib/photoPosition";
+import AdaptivePhotoImage from "./AdaptivePhotoImage";
 
 type Props = {
   photo: Photo; index: number; cameraZ: number; position: Position;
   onOpen: (photo: Photo) => void;
 };
 export default function PhotoCard({ photo, index, cameraZ, position, onOpen }: Props) {
-  const [failed, setFailed] = useState(false);
   const depth = photoDepth(index, cameraZ);
   if (!depth.visible) return null;
   const style = {
@@ -26,10 +26,7 @@ export default function PhotoCard({ photo, index, cameraZ, position, onOpen }: P
       data-photo-id={photo.id} data-photo-index={index} data-relative-z={depth.relativeZ.toFixed(2)}
       aria-label={`View ${photo.filename}`}>
       <span className="photo-card__image">
-        {failed ? <span className="photo-card__failed">Image unavailable</span> :
-          <img src={photo.thumbnailUrl} alt={photo.filename} draggable={false}
-            loading={index * DEPTH_SPACING - cameraZ < 2100 ? "eager" : "lazy"} decoding="async"
-            onError={() => setFailed(true)} />}
+        <AdaptivePhotoImage key={photo.thumbnailUrl} photo={photo} relativeZ={depth.relativeZ} />
       </span>
       <span className="photo-card__caption">
         <span className="photo-card__filename">{photo.filename}</span>
