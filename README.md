@@ -1,88 +1,326 @@
 # 3D Photo Viewer
 
-A local Next.js / React / TypeScript application that lets you travel through a
-chronological collection of floating photographs using CSS perspective.
+Explore your photo collection as a journey through time. Recent photographs float
+near you, while older photographs recede into a 3D corridor. Move through the
+timeline with the mouse wheel, keyboard, touch gestures, or timeline slider, and
+open any photo in a full-resolution lightbox.
 
-## Run locally
+Built with Next.js, React, and TypeScript, the viewer uses CSS 3D transforms and
+perspective to create depth. It reads photos from a directory on the server,
+orders them by capture date with filesystem fallbacks, and generates cached image
+variants without changing the originals.
 
-Requires Node.js 20.19 or newer. This project was verified using Node.js 24.
+## Features
+
+- 3D corridor-style chronological photo browsing, newest to oldest.
+- EXIF Date Taken ordering, with modification and creation time fallbacks.
+- Continuous mouse-wheel, keyboard, touch, and timeline navigation.
+- Deterministic floating photo placement that stays stable during navigation.
+- Year markers on the right corridor wall, positioned along the photo timeline.
+- Adaptive 320 / 800 / 1600px image resolution with preloading and smooth switching.
+- Full-resolution lightbox and an **Open original** action.
+- Optional automatic photo import watcher.
+- Streamed SHA-256 duplicate detection when destination names collide.
+- Collision-safe automatic renaming without overwriting existing photos.
+- Original EXIF bytes and modification-time preservation during import.
+- Bounded photo DOM rendering for large collections.
+
+## Screenshot
+
+<!-- Add a screenshot or animated demo here, e.g. docs/images/photo-viewer.png -->
+
+## Tech stack
+
+- **Next.js** — application framework and server-side photo API.
+- **React** — viewer, controls, and lightbox.
+- **TypeScript** — application and importer code.
+- **CSS 3D transforms / perspective** — corridor and photo depth.
+- **Sharp** — high-quality resized image variants.
+- **exifr** — selective EXIF capture-date extraction.
+- **Chokidar** — incoming photo directory watcher.
+- **Playwright** — browser tests.
+
+## Quick start
+
+Requires **Node.js 20.19 or newer**. The project has been verified with Node.js 24.
+Have a directory of JPG/JPEG, PNG, or WebP photos available to the server.
 
 ```bash
-cd /mnt/disk2/CODEX/PhotoViewer3D
+git clone https://github.com/SoichiroWada/PhotoViewer3D.git
+cd PhotoViewer3D
 npm install
-# .env.local is already configured for the supplied photo directory.
-# On a fresh checkout: cp .env.example .env.local
+cp .env.example .env.local
+```
+
+Edit `.env.local` and replace the example paths with your own absolute paths:
+
+```dotenv
+PHOTO_DIRECTORY=/path/to/your/photos
+
+# Optional: required only when running the import watcher.
+PHOTO_INCOMING_DIRECTORY=/path/to/your/incoming/photos
+
+# Optional: defaults to .photo-cache/ in the application directory.
+# Must be outside PHOTO_DIRECTORY.
+# PHOTO_CACHE_DIRECTORY=/path/to/your/photo-cache
+```
+
+The viewer needs read access to the photo directory and write access to its cache.
+Then start the development server:
+
+```bash
 npm run dev
 ```
 
-Open http://127.0.0.1:3000. For a production server:
+Open [http://localhost:3000](http://localhost:3000).
+
+`npm run dev` binds to `0.0.0.0`, so the development server can be reached from
+other devices on the local network. `npm run start` binds to `127.0.0.1` by
+default. Authentication and access controls for public deployment are not included.
+
+To run a production build locally:
 
 ```bash
 npm run build
 npm run start
 ```
 
-Both scripts bind to loopback by default. This is a local viewer; authentication
-and access controls for an externally accessible deployment are not included.
+The photo API requires a Node.js server with access to your photo directory; a
+static export alone cannot provide filesystem access or image generation.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| Mouse wheel down / up | Travel continuously toward older / newer photos |
+| ArrowDown / ArrowUp | Move approximately one photo depth interval |
+| Timeline slider | Travel to any position |
+| Touch swipe upward | Move toward older photos |
+| Click or tap a photo | Open the original image in the lightbox |
+| Escape, close button, or lightbox backdrop | Close the lightbox |
+| **Open original** | Open the original image in a new browser tab |
+| **Back to present** | Return to the newest photo |
+
+Wheel capture applies to the corridor; browser Ctrl+wheel zoom is preserved.
+The lightbox suspends camera navigation. Native `<dialog>` contains focus, and
+closing it restores focus to the previous control. Reduced-motion preference
+removes camera easing; keyboard controls have visible focus states.
 
 ## Configuration
 
-Set this server-only environment variable in `.env.local`:
+All settings are server-side environment variables. Restart the server or watcher
+after changing them.
 
-```dotenv
-PHOTO_DIRECTORY=/mnt/disk2/CODEX/Photos
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PHOTO_DIRECTORY` | Required | Absolute path to the photo collection |
+| `PHOTO_INCOMING_DIRECTORY` | Required for the watcher | Absolute path to incoming photos |
+| `PHOTO_CACHE_DIRECTORY` | `.photo-cache/` in the application directory | Absolute writable cache path outside the photo collection |
+| `PHOTO_IMPORT_CONCURRENCY` | `4` | Maximum concurrent import jobs (1–16) |
+| `PHOTO_IMPORT_STABILITY_MS` | `3000` | Required file stability interval (500–60000 ms) |
+| `PHOTO_IMPORT_POLL_MS` | `250` | Stability polling interval (50–5000 ms) |
+
+The viewer scans only the photo directory's top level. JPG/JPEG, PNG, and WebP
+extensions are case-insensitive; spaces and Unicode filenames are supported.
+File symlinks are excluded. Originals are read in place, never copied into
+`public/`, and never rewritten by the viewer.
+
+The metadata catalog is cached for five seconds. Reload the page after that
+interval to see directory changes, including newly imported photos. Empty or
+unreadable directories show a reload or retry action.
+
+## Automatic photo import watcher
+
+The optional importer runs as a separate Node.js utility. Configure both
+`PHOTO_DIRECTORY` and `PHOTO_INCOMING_DIRECTORY` in `.env.local`, then run this
+in a separate terminal from the project directory:
+
+```bash
+npm run photo-watch
 ```
 
-Restart the server after changing the setting. The directory is scanned
-non-recursively. JPG/JPEG, PNG, and WebP extensions are case-insensitive;
-filenames with spaces and Unicode are supported. Files are read in place and are
-never copied to `public/` or modified. Symlinks are excluded.
+It loads the project's Next.js environment files without starting Next.js.
+Missing configured directories are created at startup; the operating-system user
+needs read/write permissions. Incoming and final directories must be separate
+and must not contain each other, including through directory symlinks.
 
-`GET /api/photos` returns the `Photo[]` metadata sorted by the selected photo date
-descending, with filename order as a stable tie-breaker. Date priority is valid
-EXIF `DateTimeOriginal`, then EXIF `CreateDate`, then filesystem `mtime`, and
-finally a usable filesystem `birthtime`. The server caches
-the scan for five seconds. Reload the page to pick up directory changes after
-that interval. If the directory is empty or unreadable, the UI offers a reload
-or retry action. The filesystem path is not included in public metadata.
+```text
+Incoming directory → wait for stable writes → check collisions → photo directory
+```
+
+The watcher processes existing files at startup and newly added or changed files
+at the incoming directory's top level. It supports the same image extensions as
+the viewer. Unsupported files remain in incoming; file symlinks and subdirectories
+are excluded.
+
+A successful import removes the incoming file after publishing the complete
+photo. A confirmed exact duplicate is also removed from incoming. If a name
+already exists with different bytes, the importer uses `name_1.JPG`, `name_2.JPG`,
+and so on. Failed imports retain their incoming files, and other jobs continue.
+EXIF bytes, modification time, pre-read access time, and ordinary permission bits
+are preserved; creation time generally cannot be restored on Linux.
+
+For a reliable handoff, copy into incoming with an unsupported temporary extension
+such as `.partial`, close the completed file, then rename it to a supported image
+extension. A stability interval cannot prove that a paused writer has finished.
+Do not resume writing or replace the same path after handing it to the importer.
+
+Ctrl+C stops watching, cancels outstanding stability waits, finishes active copy
+operations safely, and leaves queued sources for the next start. Refresh the
+viewer after its five-second catalog cache expires to see imported photos.
+
+## Development and testing
+
+```bash
+npm run test
+npm run typecheck
+npm run build
+```
+
+For browser tests, first configure a readable photo collection and build the
+application, then install Chromium and run Playwright:
+
+```bash
+npx playwright install chromium
+npm run test:browser
+```
+
+Browser tests start a local production server when needed. Outside CI, an existing
+server may be reused; set `TEST_BASE_URL` when testing an already-running server
+at another address. Alternatively, set `CHROME_PATH` to the absolute path of an
+installed Chrome executable.
+
+The real-photo browser tests need at least eight decodable photos. Resolution
+tests expect originals wider than 1600px after orientation, including the first
+and seventh photos in date order. Other browser cases use mock catalogs, including
+a 10,000-photo collection, to verify bounded DOM rendering.
+
+Automated tests cover date priority and malformed EXIF, metadata/cache
+invalidation, sorting, supported files and symlink rejection, image variants and
+ETags, positioning and camera bounds, wheel movement and passing, lightbox focus,
+responsive layout, resolution switching, and year markers. Importer tests use
+temporary directories for real imports, live watching, streamed hashes, collision
+races, timestamp/EXIF preservation, cleanup, and source-change protection.
+
+## Implementation details
+
+### Photo dates and API
+
+The public model remains:
+
+```ts
+type Photo = {
+  id: string;
+  filename: string;
+  thumbnailUrl: string;
+  originalUrl: string;
+  takenAt: string;
+};
+```
+
+`GET /api/photos` returns photos sorted newest to oldest by the selected ISO
+`takenAt`, with filename order as a stable tie-breaker. Date selection tries:
+
+1. Valid EXIF `DateTimeOriginal`, then EXIF `CreateDate`.
+2. Filesystem modification time (`stat.mtime`).
+3. Usable filesystem creation time (`stat.birthtime`).
+
+Missing, malformed, or invalid metadata falls back per photo without failing the
+collection. Unsupported or epoch birthtime is rejected. If every date is invalid,
+the photo remains with an epoch placeholder and `source: null` in diagnostics.
+
+exifr parses only capture-date and associated timezone-offset tags. JPEGs use
+bounded chunked reads. PNG/WebP readers skip pixel payloads and pass only their
+EXIF chunk to exifr, with defensive limits of 320 KiB and 512 container headers.
+Unchanged date results and pending reads are shared in a cache keyed by path,
+device/inode, size, mtime, ctime, and birthtime; removed entries are pruned.
+Filesystem scanning processes batches of up to 32 files.
+
+EXIF dates with a usable offset use it; dates without one use the server's local
+timezone. Set the server's `TZ` environment variable if a specific timezone is
+needed. No location or timezone is inferred. Displayed calendar years follow the
+browser's local dates. XMP-only dates and subsecond EXIF timestamps are not read.
+
+The server-only `loadPhotoDateDiagnostics()` exposes the chosen source
+(`dateTaken`, `dateModified`, or `dateCreated`) and EXIF tag for development.
+These fields and the filesystem directory path are excluded from public metadata.
 
 `GET /api/photos/[id]?size=small|medium|large|original` serves a cataloged image
-through an opaque stable ID. Omitting size streams the original for compatibility.
-Variants use WebP; originals retain their MIME type. Both support ETag
-revalidation. No arbitrary filesystem path or resize dimension is accepted.
-A file deleted after scanning returns 404; unsupported size values return 400.
+through an opaque stable ID. Omitting `size` streams the original for
+compatibility. `thumbnailUrl` points to the small variant; `originalUrl` points
+to `size=original`. Variants use WebP, while originals retain their MIME type.
+Both support ETag revalidation; a `304 Not Modified` response lets the browser
+reuse its cached image. Invalid sizes return 400 and missing photos return 404.
+Arbitrary filesystem paths and resize dimensions are not accepted.
 
-## Adaptive image resolution
+### Corridor, positioning, and rendering
 
-The Photo model still has the same five fields. `thumbnailUrl` points to the
-small variant and `originalUrl` to `size=original`. Cards select a variant using
-relative depth; captions and date selection still come from the original files.
-The lightbox and Open original action always use the original.
+The corridor's floor, ceiling, walls, lighting, and depth guides are drawn with
+CSS. Photo X/Y coordinates use ID-seeded rejection sampling: up to twelve
+candidates reduce clustering against the three adjacent depths. Positions are
+reused across renders and camera movement; catalog changes can alter nearby
+placement choices. Chronology alone determines Z.
+
+```text
+photoZ = index × 420
+relativeZ = photoZ − cameraZ
+translateZ = −(relativeZ + 300)
+perspective = 900px
+```
+
+Wheel, keyboard, touch, and timeline input update a clamped target camera.
+Time-based animation-frame interpolation eases the current camera toward it.
+Perspective makes approaching photos appear larger without explicit `scale()`
+transforms. Desktop cards use `clamp(320px, 28vw, 460px)` width and
+`clamp(220px, 20vw, 320px)` image-frame height. At viewport widths up to 640px,
+cards are 175px wide with a 115px image frame. `object-fit: contain` preserves the
+whole photograph.
+
+Passed photos fade from relative depth −600 to −800 (approximately 1.5× to 2.25×
+perspective enlargement), then unmount before the perspective singularity.
+The renderer considers five passed and 25 upcoming indices plus the current
+index: at most 31 slots, with passed cards beyond the cutoff absent. Only photo
+DOM rendering is bounded; the full metadata catalog remains in memory.
+
+Year markers use actual photo-date boundaries and the first photo depth of each
+year. Text is rotated 90 degrees left on the inward-facing right wall and moves
+with the same camera and perspective. Nearby markers are selected with binary
+search; labels do not capture pointer events. Their fade range is −750 to −1050,
+and the camera can travel 1050 depth units beyond the oldest photo.
+
+The browser lightbox always uses the original image. Its viewing behavior is
+isolated in `PhotoModal` for possible future native-viewer integration.
+
+### Adaptive image resolution
+
+Cards select a variant by relative depth, independently of their geometry:
 
 | Tier | Target width | Enter while approaching | Start preloading | Retain while retreating |
 | --- | --- | --- | --- | --- |
-| Small | 320px | relativeZ > 2000 | normal lazy image loading | medium returns to small above 2400 |
-| Medium | 800px | relativeZ <= 2000 | relativeZ <= 2400 | through relativeZ 2400 |
-| Large | 1600px | relativeZ <= 400 | relativeZ <= 800 | through relativeZ 800 |
+| Small | 320px | `relativeZ > 2000` | Normal lazy loading | Medium returns to small above 2400 |
+| Medium | 800px | `relativeZ <= 2000` | `relativeZ <= 2400` | Through 2400 |
+| Large | 1600px | `relativeZ <= 400` | `relativeZ <= 800` | Through 800 |
 
-Upgrades and downgrades keep the current image displayed until the requested
-replacement loads and decodes. Nearby cards hold at most one decoded speculative
-variant; distant cards don't preload large images. The shared client queue caps
-preload/upgrade requests at three, prioritizes required replacements, and
-cancels abandoned requests. Threshold hysteresis avoids switching repeatedly
-when scrolling back and forth around a boundary. Failed upgrades retain the
-current image. A failed speculative load may retry once when required; failed
-required upgrades are retried after the card remounts. Initial variant failures
-fall back to a small variant, then to the original, so readable photos remain
-available if resizing is unavailable.
+The current image stays visible until its replacement loads and decodes.
+Threshold hysteresis prevents repeated switching near a boundary. Nearby cards
+hold at most one decoded speculative variant; distant cards do not preload large
+images. A shared client queue caps preload/upgrade requests at three, prioritizes
+required replacements, and cancels abandoned requests.
 
-Sharp 0.35.5 generates variants on demand using Lanczos3, aspect-ratio-preserving
-width-only resizing, EXIF auto-orientation, no enlargement, and WebP quality 90
-with smart subsampling and effort 4. Smaller originals remain smaller. Generated
-files contain rendered pixels rather than copied EXIF metadata; originals and
-their EXIF bytes are never rewritten. Original mtime is unchanged.
+Failed upgrades retain the current image. A failed speculative load may retry
+once when required; failed required upgrades retry after remounting. Initial
+variant failures fall back to small, then to the original. The lightbox and
+**Open original** always use the original, regardless of card resolution.
 
-The default disk cache is `.photo-cache/` in the application working directory:
+Sharp generates variants on demand with EXIF auto-orientation, Lanczos3,
+aspect-ratio-preserving width-only resizing, no enlargement, and
+`fastShrinkOnLoad: false`. WebP settings are quality 90, smart subsampling, and
+effort 4. Smaller originals remain smaller. Generated variants do not copy EXIF
+metadata; original image bytes and modification times are unchanged.
+
+### Disk cache and invalidation
+
+The default cache layout, using the current Sharp version, is:
 
 ```text
 .photo-cache/
@@ -95,285 +333,100 @@ The default disk cache is `.photo-cache/` in the application working directory:
           large.webp
 ```
 
-Set `PHOTO_CACHE_DIRECTORY` to an absolute writable path outside PHOTO_DIRECTORY
-to override the root. Symlink resolution is checked to prevent storing variants
-inside the originals directory. Cache files are excluded from Git and public/;
-they are delivered only through cataloged IDs. Temporary files are atomically
-renamed after generation and source verification completes. Concurrent identical
-requests share generation within a server process; subsequent requests and
-server restarts reuse complete disk entries. Two resize jobs can run at once,
-with at most 64 waiting distinct jobs. Sharp uses two worker threads per job and
-a 32 MiB libvips operation cache. Streamed input can still be buffered internally
-by Sharp; encoded input is capped at 64 MiB and decoded input at 80 million
-pixels. Oversized or malformed inputs retain their original-image fallback.
+`PHOTO_CACHE_DIRECTORY` overrides the root with an absolute writable path outside
+the originals directory. Resolved symlinks are checked to enforce this separation.
+The default cache is Git-ignored and variants are delivered through the photo API.
 
-The source revision uses device/inode, size, precise mtime, and ctime. These are
-included in the cache key and browser URL, covering replacement even when mtime
-and size are preserved. Each request rechecks live source metadata; sources
-that change while generating aren't published as a usable variant. Recipe and
-Sharp version are also part of the cache namespace. The existing five-second
-metadata catalog cache remains; refresh after that interval to get new image
-URLs after a source change. Browser responses are privately cached for five
-minutes with ETags, so already-open cards aren't automatically refreshed.
+Device/inode, size, precise mtime, and ctime determine the source revision in the
+cache key and browser URL. This detects replacement even when size and mtime are
+preserved. The recipe and Sharp version also form part of the cache namespace.
+Source metadata is rechecked before publishing a variant; temporary files are
+atomically renamed only after generation and verification complete.
 
-Old revision entries are no longer selected, but are retained on disk. There is
-no automatic disk quota or age eviction in this implementation. The cache may
-be deleted while the application is stopped; needed variants regenerate. Disk
-cache writes require permission and available space. Adaptive resolution leaves
-card size, clipping, overlap, transforms, passing fades, and navigation unchanged;
-image quality still depends on the source, display density, and browser sampling.
+Concurrent identical requests share generation within a server process. Complete
+disk entries are reused across requests and server restarts. Two resize jobs run
+at once, with at most 64 waiting distinct jobs. Sharp uses two worker threads and
+a 32 MiB libvips operation cache. Encoded input is capped at 64 MiB and decoded
+input at 80 million pixels; streamed input can still be buffered internally by
+Sharp. Oversized or malformed inputs retain the original-image fallback.
 
-## Controls
+Refresh after the five-second catalog cache expires to obtain updated URLs after
+source changes. Browser responses are privately cached for five minutes with
+ETags; already-open cards do not automatically refresh. Old revision entries
+remain on disk but are no longer selected. There is no automatic quota or age
+eviction. Delete the cache while the application is stopped to reclaim space;
+needed variants regenerate on demand.
 
-- Wheel down: travel continuously toward older photos.
-- Wheel up: return toward newer photos. Small deltas cause small movement.
-- ArrowDown / ArrowUp: move approximately one photo depth interval.
-- Timeline slider: travel to any position.
-- Touch: swipe upward to move toward the past; tap a card to view it.
-- Click a photo: open its original in a browser lightbox.
-- Escape, the close button, or the backdrop: close the lightbox.
-- Open original: open the original image in a new browser tab.
-- Back to present: return to the newest photo.
+### Import safety and collision handling
 
-Wheel capture applies to the corridor; browser Ctrl+wheel zoom is preserved.
-The lightbox suspends camera navigation. Native `<dialog>` provides focus
-containment and the previous control receives focus after closing.
+Chokidar waits for writes to settle. Each queued job also verifies stable size,
+mtime, ctime, and inode for the configured interval, including startup files.
+New arrivals can therefore take about twice the stability interval. The bounded
+queue coalesces repeated events; changes during an active job schedule another
+attempt. Per-file failures leave sources for a later change or watcher restart.
 
-## Implementation
+The import sequence is:
 
-- `src/types/photo.ts`: `Photo` includes `id`, `filename`, `thumbnailUrl`,
-  `originalUrl`, and ISO `takenAt`.
-- `src/lib/photoLoader.ts`: server-only, bounded-concurrency scanning, metadata
-  cache, ID mapping, and safe image opening.
-- `src/lib/photoDate.ts`: strict EXIF date validation and filesystem fallbacks,
-  using exifr 7.1.3 to parse only capture date and associated timezone-offset tags.
-  JPEGs use bounded chunked reading. PNG/WebP readers skip pixel payloads and
-  pass only their EXIF chunk to exifr (at most 320 KiB, 512 container headers).
-  Unchanged date results are cached by path, inode, size, mtime, ctime, and
-  birthtime, including shared pending work; removed files are pruned after scans.
-  Malformed or missing metadata falls back per photo without failing the catalog.
-  `next.config.ts` keeps exifr external so its Node filesystem reader also works
-  in the production build.
-  `loadPhotoDateDiagnostics()` in the server-only loader exposes `source`
-  (`dateTaken`, `dateModified`, or `dateCreated`) and the selected EXIF tag during
-  development. These fields are not added to the public `Photo` JSON.
-- `src/lib/photoPosition.ts`: ID-seeded X/Y rejection sampling without visible
-  rows or bands. Up to twelve candidates avoid clustering against the three
-  adjacent depths where practical. Coordinates are calculated once per catalog
-  and reused during renders and camera movement. A changed catalog can alter
-  nearby overlap choices; Phase 1 does not persist positions across catalog edits.
-- `PhotoViewer`: wheel/key/touch input updates a clamped target camera.
-  Time-based animation-frame interpolation eases the current camera toward it.
-- `PhotoCard`: `photoZ = index * 420`, `relativeZ = photoZ - cameraZ`,
-  `translateZ = -(relativeZ + 300)`. A 900px CSS perspective produces increasing
-  size as the camera approaches. The card fades and unmounts before the camera
-  plane is reached, avoiding the perspective singularity. Desktop card width is
-  `clamp(320px, 28vw, 460px)` and its image-frame height is
-  `clamp(220px, 20vw, 320px)`; `object-fit: contain` keeps the whole photo visible.
-  At widths up to 640px, the existing 175px card and 115px image height remain.
-  Passed photos fade from relative depth -600 to -800 (1.5x to 2.25x perspective
-  scale), then unmount. Wall-year labels retain their -750 to -1050 lifecycle,
-  and the camera's final travel distance remains unchanged. X/Y adapt to viewport
-  size, while chronology alone determines Z.
-- Only a window of five passed and 25 upcoming indices, plus the current index,
-  is considered (at most 31 slots; passed cards beyond the cutoff are absent).
-  Small variants are lazy loaded at distant depths. The full metadata catalog
-  remains in memory.
-- `PhotoModal`: isolated browser viewing behavior for possible future native
-  integration; original viewing does not launch a Windows application.
-- `CorridorYears` and `src/lib/yearMarkers.ts`: actual year boundaries derived
-  from the photo dates, anchored at the first photo depth of each year. Text is
-  rotated 90 degrees left on an inward-facing right-wall plane, clipped to the
-  wall and moved with the same camera and perspective as the photos. Nearby
-  marker selection uses binary search; labels never capture pointer events.
-  Calendar years match the local dates displayed elsewhere in the viewer.
-- `Corridor`: CSS floor, ceiling, side walls, lighting, and depth guides. The
-  supplied stock image is a visual reference only and is not copied into the app.
-- Reduced-motion preference removes camera easing. Accessible controls remain
-  usable through the keyboard, with visible focus states.
+1. Validate a small signature consistent with the image extension. This checks
+   the format, without fully decoding or repairing pixel data.
+2. Try the original destination name. An available name needs no hashing.
+3. For occupied candidates, compare sizes first, then streamed SHA-256 for equal
+   sizes. Reuse the incoming digest across candidates. Matching bytes are an
+   exact duplicate; unrelated filenames are not globally deduplicated.
+4. Use numbered names for different bytes. Occupied numbered candidates are
+   checked too, supporting retries after an earlier import's source deletion
+   failed. Existing directories and symlinks are never followed or overwritten.
+5. Copy unchanged bytes into `.photo-import-<uuid>.importing` in the destination.
+   Preserve EXIF, mtime, pre-read atime, and ordinary permissions, then fsync.
+6. Publish with an exclusive hard link, then sync the destination directory.
+   An `EEXIST` race triggers another comparison or numbered name. This avoids
+   Linux `rename()` behavior that could overwrite an existing destination.
+7. Remove the temporary link, then the unchanged incoming source. Confirmed
+   duplicates are removed only after comparison and a final source check.
+   Failures retain incoming and clean temporary files where permissions allow.
 
-## Validation
+Source identity and state are rechecked after hashing/copying and before removal.
+These checks and unlink cannot be made indivisible against an uncooperative writer
+with portable filesystem APIs; use the completed-file handoff described above.
 
-```bash
-npm run test
-npm run typecheck
-npm run build
-# Requires a production build and Chromium installed by Playwright:
-npx playwright install chromium
-npm run test:browser
-# Alternatively, use an existing Chrome installation:
-CHROME_PATH=/usr/bin/google-chrome npm run test:browser
-```
+## Project structure
 
-Browser tests start a local production server when needed. Set `TEST_BASE_URL`
-only when testing an already-running server at another address.
+| Area | Files |
+| --- | --- |
+| Viewer and lightbox | `src/components/PhotoViewer.tsx`, `PhotoCard.tsx`, `PhotoModal.tsx` |
+| Corridor and year markers | `src/components/Corridor.tsx`, `CorridorYears.tsx`, `src/lib/yearMarkers.ts` |
+| Photo catalog and dates | `src/lib/photoLoader.ts`, `photoDate.ts`, `src/types/photo.ts` |
+| Positioning and camera geometry | `src/lib/photoPosition.ts` |
+| Adaptive images and cache | `src/components/AdaptivePhotoImage.tsx`, `src/lib/photoResolution.ts`, `imagePreloader.ts`, `photoVariantCache.ts`, `photoRevision.ts` |
+| Photo API | `src/app/api/photos/` |
+| Importer | `scripts/photo-import-watcher.ts`, `src/lib/photoImport/` |
+| Automated tests | `tests/`, `tests/browser/`, `playwright.config.ts` |
 
-Tests cover capture-date priority, real JPEG/PNG/WebP EXIF, invalid/malformed
-metadata, date cache invalidation, effective-date sorting, supported filenames,
-symlink rejection, invalid IDs,
-missing/empty directories, stable scattered positions, projection and passing,
-wheel normalization, interpolation, camera bounds, real photo delivery/ETags,
-lightbox focus, responsive layout, and bounded DOM rendering with a 10,000-item
-mock catalog.
+## Current limitations
 
-## Phase 1 limitations
-
-- EXIF dates with an offset use that offset; dates without one use the server's
-  local timezone. Set the server's `TZ` environment variable if the photo
-  collection needs a specific timezone (for example, `Asia/Tokyo`). No location
-  or timezone is inferred from the images. XMP-only dates and subsecond EXIF
-  timestamps are not extracted.
-- Photos without usable EXIF fall back to mtime, then positive birthtime.
-  Unsupported/epoch birthtime is rejected. If every date is unavailable or
-  invalid, a photo remains with an epoch placeholder and `source: null` in
-  diagnostics. No capture date is invented or files dropped.
-- Defensive EXIF read limits can skip metadata in unusually large or fragmented
-  containers; these photos still use filesystem date fallbacks.
-- Distance-adaptive variants reduce image bandwidth and decoding costs. First
-  requests pay generation time; current images remain visible during upgrades.
-  The original-image fallback can be expensive when resizing is unavailable.
-- Overlap avoidance reduces local clustering but is not a collision-free
-  layout. Cards enlarge beyond the viewport as you pass them intentionally.
-  A partially or completely occluded card becomes easier to select as you move.
-- Directory scanning and metadata payload are still proportional to collection
-  size; only photo DOM mounting is virtualized. Very large collections may need
-  pagination, a persistent catalog, and background indexing.
-- No recursive folders, uploads, Windows-native integration,
-  authentication, or live directory watching in this version.
 - Modern browsers with CSS 3D transforms and native dialog support are required.
-  Chrome is the browser exercised by the included end-to-end tests.
-
-## Automatic photo import watcher
-
-The importer is a separate Node.js utility. It does not need the Next.js server
-and does not change camera/navigation behavior. Chokidar 5 requires Node.js
-20.19 or newer; this project is tested on Node.js 24.
-
-`.env.local` is configured with:
-
-```dotenv
-PHOTO_DIRECTORY=/mnt/disk2/CODEX/Photos
-PHOTO_INCOMING_DIRECTORY=/mnt/disk2/CODEX/PhotoIncoming
-```
-
-Start the utility from the project directory:
-
-```bash
-cd /mnt/disk2/CODEX/PhotoViewer3D
-npm run photo-watch
-```
-
-Run `npm run dev` in a separate terminal for the viewer. The watcher loads the
-existing Next.js environment files without starting Next.js. Missing configured
-directories are created at startup; the operating-system user must have the
-necessary read/write permissions. Incoming and final directories must be
-separate and must not contain each other, including through directory symlinks.
-
-The watcher processes files already present at startup and newly added/changed
-files at the incoming directory's top level. File symlinks are rejected, and
-subdirectories are not imported. Unsupported extensions are logged and left
-in incoming. Supported extensions are case-insensitive JPG, JPEG, PNG, and WebP;
-spaces and the extension's original capitalization are preserved.
-
-Optional settings, shown with their defaults:
-
-```dotenv
-PHOTO_IMPORT_CONCURRENCY=4
-PHOTO_IMPORT_STABILITY_MS=3000
-PHOTO_IMPORT_POLL_MS=250
-```
-
-Chokidar waits for writes to settle. Every job then independently verifies that
-size, mtime, ctime, and inode remain stable for the configured interval, including
-startup files and files delayed in the work queue. Later arrivals can therefore
-take about twice the stability interval before importing. A four-job work queue
-bounds active imports and coalesces repeated events for the same path. Changes
-observed during an active job schedule another attempt. Per-file failures are
-logged and leave the file for a later change or watcher restart; failures do not
-stop other imports. Ctrl+C closes watching, cancels outstanding stability waits,
-finishes active copy operations safely, and leaves queued sources for next start.
-
-A stability interval cannot prove that a paused producer has finished. For the
-strongest handoff, copy into incoming with an unsupported temporary extension
-(such as `.partial`), close the completed file, then rename it to `.JPG`, `.PNG`,
-or another supported extension. Do not resume writing or replace the same path
-after handing a completed image to the importer. The importer rechecks source
-identity/state after hashing/copying and immediately before removal, but no
-portable filesystem API makes these checks and unlink one indivisible operation
-against an uncooperative writer.
-
-Import decisions:
-
-1. Validate a small image signature consistent with its extension. This is a
-   lightweight format check, not full pixel decoding or repair of corrupt data.
-2. Try the original destination name. Absent names require no hashing.
-3. For an occupied candidate, compare sizes first. Different sizes need no hash.
-   Equal sizes use streamed SHA-256; the incoming digest is reused for additional
-   occupied candidates. Matching bytes are an exact duplicate. Existing
-   directories/symlinks are never followed or overwritten.
-4. Different bytes use `name_1.JPG`, `name_2.JPG`, and so on. Occupied numbered
-   candidates are also checked for exact duplicates, allowing safe retries of
-   an earlier completed import whose incoming deletion did not finish.
-5. Copy unmodified bytes into `.photo-import-<uuid>.importing` in the destination.
-   This extension is not a viewer photo type. All EXIF information is preserved.
-   Restore source mtime, pre-read atime, and ordinary permission bits, then fsync.
-6. Atomically publish with an exclusive hard link. Normal `rename()` on Linux
-   can replace an existing destination, so it is deliberately not used. A race
-   returning EEXIST triggers comparison or another numbered name, without ever
-   overwriting. Sync the destination directory before removing the source.
-7. Remove the temporary link and only then remove the unchanged incoming file.
-   Confirmed duplicates are removed from incoming only after comparison and a
-   final source check. Copy/publication/hash failures retain incoming and clean
-   the utility's temporary files where filesystem permissions allow.
-
-Example logs:
-
-```text
-Imported:
-  IMG_1234.JPG
-  -> /mnt/disk2/CODEX/Photos/IMG_1234.JPG
-
-Renamed and imported:
-  DSC_1000.JPG
-  -> /mnt/disk2/CODEX/Photos/DSC_1000_1.JPG
-
-Duplicate skipped:
-  DSC_1000.JPG
-  identical to /mnt/disk2/CODEX/Photos/DSC_1000.JPG
-
-Ignored unsupported file:
-  document.txt
-  Unsupported extension
-
-Import failed:
-  IMG_9999.JPG
-  reason: Invalid or mismatched image signature for IMG_9999.JPG.
-```
-
-The implementation lives in `scripts/photo-import-watcher.ts` and
-`src/lib/photoImport/` (stream helpers, hashing, filename publication, stability,
-validation, importing, bounded queue, watcher lifecycle, and types). `npm run
-test` includes real temporary-directory imports and live Chokidar tests,
-16 MiB streaming-hash checks, identical/different-content races, timestamp and
-EXIF preservation, copy failure cleanup, and source-change protection. Live
-photo directories are not used by these tests.
-
-Linux/filesystem limitations:
-
-- Creation time/birthtime generally cannot be restored by Node.js on Linux.
-  The destination's creation time is new; EXIF and mtime remain original, matching
-  the viewer's date preference. Ownership, ACLs, and extended attributes are not
-  copied, and special setuid/setgid/sticky permission bits are not propagated.
-- Publication requires hard-link and directory-fsync support in the destination
-  filesystem. Unsupported operations fail safely and retain the incoming file;
-  no weaker overwrite-prone fallback is used. The incoming directory may be on
-  a different filesystem because image bytes are copied first.
-- Abrupt termination/power loss can leave `.importing` files, which the viewer
-  ignores. Inspect these manually before cleanup; automatic deletion could
-  interfere with another running importer. Successfully published photos are
-  complete; a source left after a crash is rechecked on restart.
-- There is no persistent hash index for identical images under unrelated names,
-  systemd service, import history database, or automatic UI refresh. Image variants
-  are generated on demand by the viewer, not by the importer. After imports,
-  refresh the viewer after its five-second catalog
-  cache expires. Very long filenames may not allow an added collision suffix.
+  Chromium/Chrome is exercised by the included browser tests.
+- Overlap avoidance reduces clustering but does not guarantee a collision-free
+  layout. Passing cards can extend beyond the viewport. Image sharpness still
+  depends on source quality, display density, and browser sampling.
+- Scanning and metadata payload size grow with the collection. Very large
+  collections may need pagination, persistent catalog storage, or background
+  indexing. Defensive EXIF read limits can skip unusually large metadata;
+  filesystem dates still provide fallbacks.
+- First variant requests incur generation time. Original-image fallbacks can be
+  expensive when resizing is unavailable, and obsolete disk-cache entries need
+  manual cleanup.
+- The importer requires destination filesystem support for hard links and
+  directory fsync. Unsupported operations retain incoming files. Incoming and
+  final directories may be on different filesystems because bytes are copied
+  into destination staging files first.
+- Linux creation time/birthtime is not preserved during import. Ownership, ACLs,
+  extended attributes, and special setuid/setgid/sticky bits are not copied.
+- Abrupt termination can leave `.importing` files that the viewer ignores.
+  Inspect them manually before cleanup to avoid interfering with another
+  importer. Successfully published photos are complete; sources left after a
+  crash are rechecked on restart. Very long names may not permit collision suffixes.
+- No recursive photo folders, uploads, Windows-native photo viewer integration,
+  authentication, automatic viewer refresh, persistent global duplicate index,
+  systemd service, or import history database are included. Image variants are
+  generated by the viewer on demand, independently of the import watcher.
