@@ -5,7 +5,7 @@ chronological collection of floating photographs using CSS perspective.
 
 ## Run locally
 
-Requires Node.js 20.9 or newer. This project was verified using Node.js 24.
+Requires Node.js 20.19 or newer. This project was verified using Node.js 24.
 
 ```bash
 cd /mnt/disk2/CODEX/PhotoViewer3D
@@ -94,7 +94,13 @@ containment and the previous control receives focus after closing.
 - `PhotoCard`: `photoZ = index * 420`, `relativeZ = photoZ - cameraZ`,
   `translateZ = -(relativeZ + 300)`. A 900px CSS perspective produces increasing
   size as the camera approaches. The card fades and unmounts before the camera
-  plane is reached, avoiding the perspective singularity. X/Y adapt to viewport
+  plane is reached, avoiding the perspective singularity. Desktop card width is
+  `clamp(320px, 28vw, 460px)` and its image-frame height is
+  `clamp(220px, 20vw, 320px)`; `object-fit: contain` keeps the whole photo visible.
+  At widths up to 640px, the existing 175px card and 115px image height remain.
+  Passed photos fade from relative depth -600 to -800 (1.5x to 2.25x perspective
+  scale), then unmount. Wall-year labels retain their -750 to -1050 lifecycle,
+  and the camera's final travel distance remains unchanged. X/Y adapt to viewport
   size, while chronology alone determines Z.
 - Only a window of five passed and 25 upcoming indices, plus the current index,
   is considered (at most 31 slots; passed cards beyond the cutoff are absent).
@@ -163,3 +169,137 @@ mock catalog.
   authentication, or live directory watching in this version.
 - Modern browsers with CSS 3D transforms and native dialog support are required.
   Chrome is the browser exercised by the included end-to-end tests.
+
+## Automatic photo import watcher
+
+The importer is a separate Node.js utility. It does not need the Next.js server
+and does not change camera/navigation behavior. Chokidar 5 requires Node.js
+20.19 or newer; this project is tested on Node.js 24.
+
+`.env.local` is configured with:
+
+```dotenv
+PHOTO_DIRECTORY=/mnt/disk2/CODEX/Photos
+PHOTO_INCOMING_DIRECTORY=/mnt/disk2/CODEX/PhotoIncoming
+```
+
+Start the utility from the project directory:
+
+```bash
+cd /mnt/disk2/CODEX/PhotoViewer3D
+npm run photo-watch
+```
+
+Run `npm run dev` in a separate terminal for the viewer. The watcher loads the
+existing Next.js environment files without starting Next.js. Missing configured
+directories are created at startup; the operating-system user must have the
+necessary read/write permissions. Incoming and final directories must be
+separate and must not contain each other, including through directory symlinks.
+
+The watcher processes files already present at startup and newly added/changed
+files at the incoming directory's top level. File symlinks are rejected, and
+subdirectories are not imported. Unsupported extensions are logged and left
+in incoming. Supported extensions are case-insensitive JPG, JPEG, PNG, and WebP;
+spaces and the extension's original capitalization are preserved.
+
+Optional settings, shown with their defaults:
+
+```dotenv
+PHOTO_IMPORT_CONCURRENCY=4
+PHOTO_IMPORT_STABILITY_MS=3000
+PHOTO_IMPORT_POLL_MS=250
+```
+
+Chokidar waits for writes to settle. Every job then independently verifies that
+size, mtime, ctime, and inode remain stable for the configured interval, including
+startup files and files delayed in the work queue. Later arrivals can therefore
+take about twice the stability interval before importing. A four-job work queue
+bounds active imports and coalesces repeated events for the same path. Changes
+observed during an active job schedule another attempt. Per-file failures are
+logged and leave the file for a later change or watcher restart; failures do not
+stop other imports. Ctrl+C closes watching, cancels outstanding stability waits,
+finishes active copy operations safely, and leaves queued sources for next start.
+
+A stability interval cannot prove that a paused producer has finished. For the
+strongest handoff, copy into incoming with an unsupported temporary extension
+(such as `.partial`), close the completed file, then rename it to `.JPG`, `.PNG`,
+or another supported extension. Do not resume writing or replace the same path
+after handing a completed image to the importer. The importer rechecks source
+identity/state after hashing/copying and immediately before removal, but no
+portable filesystem API makes these checks and unlink one indivisible operation
+against an uncooperative writer.
+
+Import decisions:
+
+1. Validate a small image signature consistent with its extension. This is a
+   lightweight format check, not full pixel decoding or repair of corrupt data.
+2. Try the original destination name. Absent names require no hashing.
+3. For an occupied candidate, compare sizes first. Different sizes need no hash.
+   Equal sizes use streamed SHA-256; the incoming digest is reused for additional
+   occupied candidates. Matching bytes are an exact duplicate. Existing
+   directories/symlinks are never followed or overwritten.
+4. Different bytes use `name_1.JPG`, `name_2.JPG`, and so on. Occupied numbered
+   candidates are also checked for exact duplicates, allowing safe retries of
+   an earlier completed import whose incoming deletion did not finish.
+5. Copy unmodified bytes into `.photo-import-<uuid>.importing` in the destination.
+   This extension is not a viewer photo type. All EXIF information is preserved.
+   Restore source mtime, pre-read atime, and ordinary permission bits, then fsync.
+6. Atomically publish with an exclusive hard link. Normal `rename()` on Linux
+   can replace an existing destination, so it is deliberately not used. A race
+   returning EEXIST triggers comparison or another numbered name, without ever
+   overwriting. Sync the destination directory before removing the source.
+7. Remove the temporary link and only then remove the unchanged incoming file.
+   Confirmed duplicates are removed from incoming only after comparison and a
+   final source check. Copy/publication/hash failures retain incoming and clean
+   the utility's temporary files where filesystem permissions allow.
+
+Example logs:
+
+```text
+Imported:
+  IMG_1234.JPG
+  -> /mnt/disk2/CODEX/Photos/IMG_1234.JPG
+
+Renamed and imported:
+  DSC_1000.JPG
+  -> /mnt/disk2/CODEX/Photos/DSC_1000_1.JPG
+
+Duplicate skipped:
+  DSC_1000.JPG
+  identical to /mnt/disk2/CODEX/Photos/DSC_1000.JPG
+
+Ignored unsupported file:
+  document.txt
+  Unsupported extension
+
+Import failed:
+  IMG_9999.JPG
+  reason: Invalid or mismatched image signature for IMG_9999.JPG.
+```
+
+The implementation lives in `scripts/photo-import-watcher.ts` and
+`src/lib/photoImport/` (stream helpers, hashing, filename publication, stability,
+validation, importing, bounded queue, watcher lifecycle, and types). `npm run
+test` includes real temporary-directory imports and live Chokidar tests,
+16 MiB streaming-hash checks, identical/different-content races, timestamp and
+EXIF preservation, copy failure cleanup, and source-change protection. Live
+photo directories are not used by these tests.
+
+Linux/filesystem limitations:
+
+- Creation time/birthtime generally cannot be restored by Node.js on Linux.
+  The destination's creation time is new; EXIF and mtime remain original, matching
+  the viewer's date preference. Ownership, ACLs, and extended attributes are not
+  copied, and special setuid/setgid/sticky permission bits are not propagated.
+- Publication requires hard-link and directory-fsync support in the destination
+  filesystem. Unsupported operations fail safely and retain the incoming file;
+  no weaker overwrite-prone fallback is used. The incoming directory may be on
+  a different filesystem because image bytes are copied first.
+- Abrupt termination/power loss can leave `.importing` files, which the viewer
+  ignores. Inspect these manually before cleanup; automatic deletion could
+  interfere with another running importer. Successfully published photos are
+  complete; a source left after a crash is rechecked on restart.
+- There is no persistent hash index for identical images under unrelated names,
+  systemd service, import history database, automatic UI refresh, or thumbnail
+  pipeline. After imports, refresh the viewer after its five-second catalog
+  cache expires. Very long filenames may not allow an added collision suffix.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   cameraLimit, cameraStep, clampCamera, createPhotoPositions, DEPTH_SPACING,
-  INITIAL_DEPTH, PASS_CUTOFF, photoDepth, PERSPECTIVE, visibleWindow, wheelDistance,
+  INITIAL_DEPTH, PASS_CUTOFF, PASS_FADE_START, photoDepth, PERSPECTIVE, visibleWindow, wheelDistance, yearDepth,
 } from "../src/lib/photoPosition";
 
 test("ID-seeded positions remain stable, scattered, and bounded", () => {
@@ -18,12 +18,19 @@ test("chronological depth approaches, enlarges, and disappears after passing", (
   const index = 6;
   const far = photoDepth(index, 0);
   const near = photoDepth(index, index * DEPTH_SPACING);
-  const foreground = photoDepth(index, index * DEPTH_SPACING + 850);
+  const foreground = photoDepth(index, index * DEPTH_SPACING - PASS_FADE_START);
   const scale = (z: number) => PERSPECTIVE / (PERSPECTIVE - z);
   assert.ok(scale(far.translateZ) < scale(near.translateZ));
   assert.ok(scale(near.translateZ) < scale(foreground.translateZ));
   assert.equal(near.translateZ, -INITIAL_DEPTH);
   assert.ok(far.opacity < near.opacity);
+  assert.equal(foreground.opacity, 1);
+  assert.equal(scale(foreground.translateZ), 1.5);
+  const fading = photoDepth(index, index * DEPTH_SPACING + 700);
+  assert.equal(fading.opacity, 0.5);
+  assert.ok(fading.visible);
+  assert.equal(photoDepth(index, index * DEPTH_SPACING - PASS_CUTOFF).opacity, 0);
+  assert.equal(scale(photoDepth(index, index * DEPTH_SPACING - PASS_CUTOFF).translateZ), 2.25);
   assert.equal(photoDepth(index, index * DEPTH_SPACING - PASS_CUTOFF).visible, false);
   assert.ok(photoDepth(index + 1, index * DEPTH_SPACING - PASS_CUTOFF).visible);
 });
@@ -40,6 +47,19 @@ test("continuous wheel input and smooth time-based interpolation", () => {
   assert.equal(clampCamera(-20, 100), 0);
   assert.equal(clampCamera(1000000, 100), cameraLimit(100));
   assert.equal(cameraLimit(0), 0);
+  assert.equal(cameraLimit(100), 99 * DEPTH_SPACING + 1050);
+});
+
+test("earlier photo fading preserves wall-year projection and visibility", () => {
+  const index = 3;
+  const camera = index * DEPTH_SPACING + 700;
+  assert.equal(photoDepth(index, camera).opacity, 0.5);
+  assert.equal(yearDepth(index, camera).opacity, 1);
+  assert.equal(yearDepth(index, camera).translateZ, photoDepth(index, camera).translateZ);
+  assert.equal(photoDepth(index, index * DEPTH_SPACING + 800).visible, false);
+  assert.equal(yearDepth(index, index * DEPTH_SPACING + 800).visible, true);
+  assert.equal(yearDepth(index, index * DEPTH_SPACING + 900).opacity, 0.5);
+  assert.equal(yearDepth(index, index * DEPTH_SPACING + 1050).visible, false);
 });
 
 test("DOM windows stay bounded even for a million photos", () => {

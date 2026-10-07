@@ -1,4 +1,4 @@
-import { photoDepth } from "@/lib/photoPosition";
+import { yearDepth } from "@/lib/photoPosition";
 import type { YearMarker } from "@/lib/yearMarkers";
 
 /** Separate decorative layer: wall-mounted years never capture photo clicks. */
@@ -8,7 +8,7 @@ export default function CorridorYears({ markers, cameraZ }: {
   return (
     <div className="scene corridor-years" aria-hidden="true">
       {markers.map(marker => {
-        const depth = photoDepth(marker.photoIndex, cameraZ);
+        const depth = yearDepth(marker.photoIndex, cameraZ);
         if (!depth.visible) return null;
         return (
           <div key={`${marker.year}-${marker.photoIndex}`} className="corridor-year"

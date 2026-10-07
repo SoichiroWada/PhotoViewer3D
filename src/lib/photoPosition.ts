@@ -3,7 +3,10 @@ import type { Photo } from "@/types/photo";
 export const DEPTH_SPACING = 420;
 export const PERSPECTIVE = 900;
 export const INITIAL_DEPTH = 300;
-export const PASS_CUTOFF = -1050;
+export const PASS_FADE_START = -600;
+export const PASS_CUTOFF = -800;
+// Keep the original timeline extent and decorative wall-label lifecycle.
+export const CAMERA_END_PADDING = 1050;
 export const UPCOMING = 25;
 export const PASSED = 5;
 export type Position = { x: number; y: number }; // normalized viewport coordinates
@@ -41,7 +44,7 @@ export function createPhotoPositions(photos: Pick<Photo, "id">[]): Map<string, P
 }
 
 export function cameraLimit(count: number): number {
-  return count === 0 ? 0 : (count - 1) * DEPTH_SPACING - PASS_CUTOFF;
+  return count === 0 ? 0 : (count - 1) * DEPTH_SPACING + CAMERA_END_PADDING;
 }
 export function clampCamera(value: number, count: number): number {
   return Math.max(0, Math.min(cameraLimit(count), value));
@@ -54,16 +57,23 @@ export function cameraStep(current: number, target: number, elapsedMs: number): 
   const next = current + (target - current) * (1 - Math.exp(-Math.min(elapsedMs, 64) / 95));
   return Math.abs(target - next) < 0.1 ? target : next;
 }
-export function photoDepth(index: number, cameraZ: number) {
+function projectedDepth(index: number, cameraZ: number, fadeStart: number, cutoff: number) {
   const relativeZ = index * DEPTH_SPACING - cameraZ;
-  const fadeInDistance = relativeZ < -750 ? Math.max(0, (relativeZ - PASS_CUTOFF) / 300) : 1;
+  const passedOpacity = relativeZ < fadeStart ? Math.max(0, (relativeZ - cutoff) / (fadeStart - cutoff)) : 1;
   return {
     relativeZ,
     translateZ: -(relativeZ + INITIAL_DEPTH),
-    opacity: Math.max(0.14, 1 - Math.max(0, relativeZ) / 14000) * fadeInDistance,
+    opacity: Math.max(0.14, 1 - Math.max(0, relativeZ) / 14000) * passedOpacity,
     brightness: Math.max(0.6, 1 - Math.max(0, relativeZ) / 20000),
-    visible: relativeZ > PASS_CUTOFF,
+    visible: relativeZ > cutoff,
   };
+}
+export function photoDepth(index: number, cameraZ: number) {
+  return projectedDepth(index, cameraZ, PASS_FADE_START, PASS_CUTOFF);
+}
+/** Wall years retain their existing fade, depth, and visibility distances. */
+export function yearDepth(index: number, cameraZ: number) {
+  return projectedDepth(index, cameraZ, -750, -1050);
 }
 export function visibleWindow(count: number, cameraZ: number) {
   const current = Math.max(0, Math.min(count - 1, Math.floor(cameraZ / DEPTH_SPACING)));
