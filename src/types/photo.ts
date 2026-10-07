@@ -3,6 +3,6 @@ export type Photo = {
   filename: string;
   thumbnailUrl: string;
   originalUrl: string;
-  /** ISO 8601; filesystem mtime for Phase 1, capture metadata later. */
+  /** ISO 8601; EXIF capture date, then mtime, then usable birthtime. */
   takenAt: string;
 };

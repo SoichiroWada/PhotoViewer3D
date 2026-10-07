@@ -50,3 +50,36 @@ test("catalog sorts files, supports uppercase and spaces, ignores symlinks and r
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("catalog sorts by selected EXIF dates and retains malformed metadata with filesystem fallback", async () => {
+  const { exifJpeg } = await import("./helpers/exif");
+  const { loadPhotoDateDiagnostics } = await import("../src/lib/photoLoader");
+  const directory = await mkdtemp(path.join(os.tmpdir(), "photo-date-catalog-"));
+  const oldSetting = process.env.PHOTO_DIRECTORY;
+  try {
+    const fixtures = [
+      { name: "capture.jpg", bytes: exifJpeg({ 0x9003: "2020:01:01 00:00:00", 0x9011: "+00:00", 0x9004: "2005:01:01 00:00:00" }), modified: "2000-01-01" },
+      { name: "modified.jpg", bytes: Buffer.from("broken EXIF"), modified: "2010-01-01" },
+      { name: "create.jpeg", bytes: exifJpeg({ 0x9003: "2023:02:30 00:00:00", 0x9004: "2005:01:01 00:00:00", 0x9012: "+00:00" }), modified: "2025-01-01" },
+      { name: "old.JPG", bytes: exifJpeg({ 0x9003: "1980:01:01 00:00:00", 0x9011: "+00:00" }), modified: "2030-01-01" },
+    ];
+    for (const fixture of fixtures) {
+      const file = path.join(directory, fixture.name);
+      await writeFile(file, fixture.bytes);
+      const date = new Date(fixture.modified + "T00:00:00.000Z");
+      await utimes(file, date, date);
+    }
+    process.env.PHOTO_DIRECTORY = directory;
+    const photos = await loadPhotos();
+    assert.deepEqual(photos.map(photo => photo.filename), ["capture.jpg", "modified.jpg", "create.jpeg", "old.JPG"]);
+    assert.deepEqual(photos.map(photo => photo.takenAt), ["2020-01-01T00:00:00.000Z", "2010-01-01T00:00:00.000Z", "2005-01-01T00:00:00.000Z", "1980-01-01T00:00:00.000Z"]);
+    assert.deepEqual(Object.keys(photos[0]).sort(), ["filename", "id", "originalUrl", "takenAt", "thumbnailUrl"]);
+    const diagnostics = await loadPhotoDateDiagnostics();
+    assert.deepEqual(diagnostics.map(entry => entry.source), ["dateTaken", "dateModified", "dateTaken", "dateTaken"]);
+    assert.equal(diagnostics[2].exifTag, "CreateDate");
+  } finally {
+    if (oldSetting === undefined) delete process.env.PHOTO_DIRECTORY;
+    else process.env.PHOTO_DIRECTORY = oldSetting;
+    await rm(directory, { recursive: true, force: true });
+  }
+});

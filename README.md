@@ -38,8 +38,10 @@ non-recursively. JPG/JPEG, PNG, and WebP extensions are case-insensitive;
 filenames with spaces and Unicode are supported. Files are read in place and are
 never copied to `public/` or modified. Symlinks are excluded.
 
-`GET /api/photos` returns the `Photo[]` metadata sorted by filesystem modification
-time descending, with filename order as a stable tie-breaker. The server caches
+`GET /api/photos` returns the `Photo[]` metadata sorted by the selected photo date
+descending, with filename order as a stable tie-breaker. Date priority is valid
+EXIF `DateTimeOriginal`, then EXIF `CreateDate`, then filesystem `mtime`, and
+finally a usable filesystem `birthtime`. The server caches
 the scan for five seconds. Reload the page to pick up directory changes after
 that interval. If the directory is empty or unreadable, the UI offers a reload
 or retry action. The filesystem path is not included in public metadata.
@@ -69,8 +71,19 @@ containment and the previous control receives focus after closing.
 - `src/types/photo.ts`: `Photo` includes `id`, `filename`, `thumbnailUrl`,
   `originalUrl`, and ISO `takenAt`.
 - `src/lib/photoLoader.ts`: server-only, bounded-concurrency scanning, metadata
-  cache, timestamp extraction, ID mapping, and safe image opening.
-  `readTakenAt` is the extension point for EXIF DateTimeOriginal.
+  cache, ID mapping, and safe image opening.
+- `src/lib/photoDate.ts`: strict EXIF date validation and filesystem fallbacks,
+  using exifr 7.1.3 to parse only capture date and associated timezone-offset tags.
+  JPEGs use bounded chunked reading. PNG/WebP readers skip pixel payloads and
+  pass only their EXIF chunk to exifr (at most 320 KiB, 512 container headers).
+  Unchanged date results are cached by path, inode, size, mtime, ctime, and
+  birthtime, including shared pending work; removed files are pruned after scans.
+  Malformed or missing metadata falls back per photo without failing the catalog.
+  `next.config.ts` keeps exifr external so its Node filesystem reader also works
+  in the production build.
+  `loadPhotoDateDiagnostics()` in the server-only loader exposes `source`
+  (`dateTaken`, `dateModified`, or `dateCreated`) and the selected EXIF tag during
+  development. These fields are not added to the public `Photo` JSON.
 - `src/lib/photoPosition.ts`: ID-seeded X/Y rejection sampling without visible
   rows or bands. Up to twelve candidates avoid clustering against the three
   adjacent depths where practical. Coordinates are calculated once per catalog
@@ -116,7 +129,9 @@ CHROME_PATH=/usr/bin/google-chrome npm run test:browser
 Browser tests start a local production server when needed. Set `TEST_BASE_URL`
 only when testing an already-running server at another address.
 
-Tests cover ordering, supported filenames, symlink rejection, invalid IDs,
+Tests cover capture-date priority, real JPEG/PNG/WebP EXIF, invalid/malformed
+metadata, date cache invalidation, effective-date sorting, supported filenames,
+symlink rejection, invalid IDs,
 missing/empty directories, stable scattered positions, projection and passing,
 wheel normalization, interpolation, camera bounds, real photo delivery/ETags,
 lightbox focus, responsive layout, and bounded DOM rendering with a 10,000-item
@@ -124,8 +139,17 @@ mock catalog.
 
 ## Phase 1 limitations
 
-- Filesystem mtime is a placeholder for capture date. Copied or edited files
-  may appear newer than they are. EXIF capture timestamps are not read yet.
+- EXIF dates with an offset use that offset; dates without one use the server's
+  local timezone. Set the server's `TZ` environment variable if the photo
+  collection needs a specific timezone (for example, `Asia/Tokyo`). No location
+  or timezone is inferred from the images. XMP-only dates and subsecond EXIF
+  timestamps are not extracted.
+- Photos without usable EXIF fall back to mtime, then positive birthtime.
+  Unsupported/epoch birthtime is rejected. If every date is unavailable or
+  invalid, a photo remains with an epoch placeholder and `source: null` in
+  diagnostics. No capture date is invented or files dropped.
+- Defensive EXIF read limits can skip metadata in unusually large or fragmented
+  containers; these photos still use filesystem date fallbacks.
 - `thumbnailUrl` and `originalUrl` intentionally use the same endpoint. Full
   images can be bandwidth- and decoding-heavy; cached thumbnail generation is
   the next optimization and no Sharp-based pipeline is required.
@@ -135,7 +159,7 @@ mock catalog.
 - Directory scanning and metadata payload are still proportional to collection
   size; only photo DOM mounting is virtualized. Very large collections may need
   pagination, a persistent catalog, and background indexing.
-- No recursive folders, uploads, EXIF extraction, Windows-native integration,
+- No recursive folders, uploads, Windows-native integration,
   authentication, or live directory watching in this version.
 - Modern browsers with CSS 3D transforms and native dialog support are required.
   Chrome is the browser exercised by the included end-to-end tests.
