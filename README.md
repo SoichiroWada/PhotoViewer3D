@@ -27,7 +27,7 @@ variants without changing the originals.
 
 ## Screenshot
 
-<!-- Add a screenshot or animated demo here, e.g. docs/images/photo-viewer.png -->
+![3D Photo Viewer](docs/images/photo-viewer-3d.png)
 
 ## Tech stack
 
