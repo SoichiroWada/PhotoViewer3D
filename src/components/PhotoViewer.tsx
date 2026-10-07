@@ -6,7 +6,9 @@ import {
   cameraLimit, cameraStep, clampCamera, createPhotoPositions, DEPTH_SPACING,
   visibleWindow, wheelDistance,
 } from "@/lib/photoPosition";
+import { createYearMarkers, nearbyYearMarkers } from "@/lib/yearMarkers";
 import Corridor from "./Corridor";
+import CorridorYears from "./CorridorYears";
 import PhotoCard from "./PhotoCard";
 import PhotoModal from "./PhotoModal";
 
@@ -26,7 +28,9 @@ export default function PhotoViewer() {
   const pointer = useRef<{ id: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   const positions = useMemo(() => createPhotoPositions(photos), [photos]);
+  const yearMarkers = useMemo(() => createYearMarkers(photos), [photos]);
   const { start, end } = visibleWindow(photos.length, cameraZ);
+  const visibleYears = useMemo(() => nearbyYearMarkers(yearMarkers, start, end), [yearMarkers, start, end]);
   const nearest = photos.length ? Math.min(photos.length - 1, Math.max(0, Math.floor(cameraZ / DEPTH_SPACING))) : 0;
   const photo = photos[nearest];
   const limit = cameraLimit(photos.length);
@@ -147,6 +151,7 @@ export default function PhotoViewer() {
         onPointerUp={() => { suppressClick.current = pointer.current?.moved ?? false; pointer.current = null; }}
         onPointerCancel={() => { pointer.current = null; suppressClick.current = false; }}>
         <Corridor />
+        <CorridorYears markers={visibleYears} cameraZ={cameraZ} />
         <div className="scene" aria-label="Floating photos">
           {photos.slice(start, end).map((item, offset) => <PhotoCard key={item.id}
             photo={item} index={start + offset} cameraZ={cameraZ}

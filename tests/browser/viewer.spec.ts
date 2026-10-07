@@ -24,7 +24,7 @@ test("real photo API and viewer support continuous movement, passing, and lightb
   await expect(page.locator(".photo-card").first()).toBeVisible();
   await expect.poll(async () => page.locator(".photo-card img").first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBeTruthy();
   await page.screenshot({ path: "test-results/corridor-desktop.png" });
-  const first = page.locator('[data-photo-index="0"]');
+  const first = page.locator('.photo-card[data-photo-index="0"]');
   const originalPosition = await first.evaluate(el => [
     (el as HTMLElement).style.getPropertyValue("--photo-x"),
     (el as HTMLElement).style.getPropertyValue("--photo-y"),

@@ -89,6 +89,12 @@ containment and the previous control receives focus after closing.
   remains in memory.
 - `PhotoModal`: isolated browser viewing behavior for possible future native
   integration; original viewing does not launch a Windows application.
+- `CorridorYears` and `src/lib/yearMarkers.ts`: actual year boundaries derived
+  from the photo dates, anchored at the first photo depth of each year. Text is
+  rotated 90 degrees left on an inward-facing right-wall plane, clipped to the
+  wall and moved with the same camera and perspective as the photos. Nearby
+  marker selection uses binary search; labels never capture pointer events.
+  Calendar years match the local dates displayed elsewhere in the viewer.
 - `Corridor`: CSS floor, ceiling, side walls, lighting, and depth guides. The
   supplied stock image is a visual reference only and is not copied into the app.
 - Reduced-motion preference removes camera easing. Accessible controls remain
