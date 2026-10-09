@@ -1,3 +1,4 @@
+import { apiBaseUrl, getBrowserPhotos, photoMetadataUrl } from "./photoApi";
 import { expect, test } from "@playwright/test";
 
 const camera = async (page: import("@playwright/test").Page) =>
@@ -6,9 +7,9 @@ const camera = async (page: import("@playwright/test").Page) =>
 test("real photo API and viewer support continuous movement, passing, and lightbox", async ({ page, request }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  const response = await request.get("/api/photos");
+  const response = await request.get(photoMetadataUrl);
   expect(response.ok()).toBeTruthy();
-  const photos = await response.json();
+  const photos = await getBrowserPhotos(request);
   expect(photos.length).toBeGreaterThan(2);
   for (let i = 1; i < photos.length; i++) {
     expect(Date.parse(photos[i - 1].takenAt)).toBeGreaterThanOrEqual(Date.parse(photos[i].takenAt));
@@ -18,7 +19,7 @@ test("real photo API and viewer support continuous movement, passing, and lightb
   expect((await image.body()).length).toBeGreaterThan(0);
   const cached = await request.get(photos[0].originalUrl, { headers: { "if-none-match": image.headers().etag } });
   expect(cached.status()).toBe(304);
-  expect((await request.get("/api/photos/000000000000000000000000")).status()).toBe(404);
+  expect((await request.get(`${apiBaseUrl}/photos/000000000000000000000000`)).status()).toBe(404);
   await page.goto("/");
   await expect(page.locator(".photo-count")).toContainText(`${photos.length} photos`);
   await expect(page.locator(".photo-card").first()).toBeVisible();
@@ -70,10 +71,10 @@ test("real photo API and viewer support continuous movement, passing, and lightb
 test("large catalogs keep the DOM bounded across the timeline", async ({ page }) => {
   const photos = Array.from({ length: 10000 }, (_, index) => ({
     id: `test-${index}`, filename: `Memory ${index}.jpg`,
-    thumbnailUrl: "/favicon.svg", originalUrl: "/favicon.svg",
+    thumbnailUrl: new URL("/favicon.svg", process.env.TEST_BASE_URL || "http://127.0.0.1:3000").href, originalUrl: new URL("/favicon.svg", process.env.TEST_BASE_URL || "http://127.0.0.1:3000").href,
     takenAt: new Date(Date.UTC(2025, 0, 1) - index * 86400000).toISOString(),
   }));
-  await page.route("**/api/photos", route => route.fulfill({ json: photos }));
+  await page.route(photoMetadataUrl, route => route.fulfill({ json: photos }));
   await page.goto("/");
   await expect(page.locator(".photo-count")).toContainText("10000 photos");
   const slider = page.getByRole("slider");
@@ -87,11 +88,11 @@ test("large catalogs keep the DOM bounded across the timeline", async ({ page })
 });
 
 test("empty and error states are actionable", async ({ page }) => {
-  await page.route("**/api/photos", route => route.fulfill({ status: 503, json: { error: "The photo directory could not be read." } }));
+  await page.route(photoMetadataUrl, route => route.fulfill({ status: 503, json: { error: "The photo directory could not be read." } }));
   await page.goto("/");
   await expect(page.locator(".viewer-message[role=alert]")).toContainText("The photo directory could not be read.");
-  await page.unroute("**/api/photos");
-  await page.route("**/api/photos", route => route.fulfill({ json: [] }));
+  await page.unroute(photoMetadataUrl);
+  await page.route(photoMetadataUrl, route => route.fulfill({ json: [] }));
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByText("Your corridor is waiting")).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload photos" })).toBeEnabled();

@@ -24,3 +24,6 @@ test-results/
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Static frontend export
+out/

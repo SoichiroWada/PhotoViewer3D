@@ -6,9 +6,10 @@ timeline with the mouse wheel, keyboard, touch gestures, or timeline slider, and
 open any photo in a full-resolution lightbox.
 
 Built with Next.js, React, and TypeScript, the viewer uses CSS 3D transforms and
-perspective to create depth. It reads photos from a directory on the server,
-orders them by capture date with filesystem fallbacks, and generates cached image
-variants without changing the originals.
+perspective to create depth. On this migration branch, the frontend fetches photo
+metadata and images from configurable external endpoints. A separate local Node.js
+backend preserves capture-date ordering and cached variants without changing the
+originals.
 
 ## Features
 
@@ -31,7 +32,7 @@ variants without changing the originals.
 
 ## Tech stack
 
-- **Next.js** — application framework and server-side photo API.
+- **Next.js** — application framework and static frontend export.
 - **React** — viewer, controls, and lightbox.
 - **TypeScript** — application and importer code.
 - **CSS 3D transforms / perspective** — corridor and photo depth.
@@ -40,13 +41,35 @@ variants without changing the originals.
 - **Chokidar** — incoming photo directory watcher.
 - **Playwright** — browser tests.
 
-## Quick start
+## AWS migration: Phase 1
+
+This branch, `migrate-to-aws-static`, exports the frontend as static HTML, CSS,
+and JavaScript with Next.js `output: "export"`. `npm run build` generates `out/`,
+which can be served without a Next.js server. See the [Next.js static export
+guide](https://nextjs.org/docs/app/guides/static-exports).
+
+Metadata comes from `<NEXT_PUBLIC_API_BASE_URL>/photos`. Relative image URLs
+resolve against `NEXT_PUBLIC_PHOTO_BASE_URL`; absolute HTTP/HTTPS URLs are
+preserved. These public values are embedded at build time and are not secrets.
+Never put AWS credentials in them.
+
+AWS deployment is **not implemented in Phase 1**, and no AWS credentials or
+resources are needed for this workflow. The later target is Amplify Hosting for
+the frontend, API Gateway and Lambda for the API, DynamoDB for photo metadata,
+and S3 with CloudFront for images. Authentication, provisioning, and deployment
+will be addressed in later phases.
+
+Local filesystem, EXIF, Sharp cache, and importer implementations remain available
+as a separate legacy/local backend. They are not part of the browser runtime or
+static export. The viewer's design and navigation behavior are unchanged.
+
+## Quick start: static frontend with a local backend
 
 Requires **Node.js 20.19 or newer**. The project has been verified with Node.js 24.
 Have a directory of JPG/JPEG, PNG, or WebP photos available to the server.
 
 ```bash
-git clone https://github.com/SoichiroWada/PhotoViewer3D.git
+git clone --branch migrate-to-aws-static https://github.com/SoichiroWada/PhotoViewer3D.git
 cd PhotoViewer3D
 npm install
 cp .env.example .env.local
@@ -55,6 +78,10 @@ cp .env.example .env.local
 Edit `.env.local` and replace the example paths with your own absolute paths:
 
 ```dotenv
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:4000
+NEXT_PUBLIC_PHOTO_BASE_URL=http://127.0.0.1:4000
+
+# Used by the separate local backend, not the static frontend.
 PHOTO_DIRECTORY=/path/to/your/photos
 
 # Optional: required only when running the import watcher.
@@ -65,8 +92,15 @@ PHOTO_INCOMING_DIRECTORY=/path/to/your/incoming/photos
 # PHOTO_CACHE_DIRECTORY=/path/to/your/photo-cache
 ```
 
-The viewer needs read access to the photo directory and write access to its cache.
-Then start the development server:
+The local backend needs read access to the photo directory and write access to
+its cache. Start it in one terminal:
+
+```bash
+npm run backend
+```
+
+It binds to `0.0.0.0:4000` and serves `/photos` and `/photos/[id]`, with legacy
+`/api/photos` aliases. Start the frontend in another terminal:
 
 ```bash
 npm run dev
@@ -76,7 +110,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 `npm run dev` binds to `0.0.0.0`, so the development server can be reached from
 other devices on the local network. `npm run start` binds to `127.0.0.1` by
-default. Authentication and access controls for public deployment are not included.
+default, serving `out/` through a simple static preview server rather than
+`next start`. The default backend URLs are for a browser on the same computer.
+Authentication and access controls for public deployment are not included.
 
 To run a production build locally:
 
@@ -85,8 +121,10 @@ npm run build
 npm run start
 ```
 
-The photo API requires a Node.js server with access to your photo directory; a
-static export alone cannot provide filesystem access or image generation.
+The exported frontend makes requests directly to the configured backend; the
+static preview does not proxy API calls. Keep `npm run backend` running for local
+photo browsing. The frontend shell can load without a backend, but shows a retry
+state until a collection is available.
 
 ## Controls
 
@@ -108,11 +146,27 @@ removes camera easing; keyboard controls have visible focus states.
 
 ## Configuration
 
-All settings are server-side environment variables. Restart the server or watcher
-after changing them.
+### Public frontend settings
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_API_BASE_URL` | Required HTTP/HTTPS API base; the client appends `/photos` |
+| `NEXT_PUBLIC_PHOTO_BASE_URL` | Base for relative image URLs; defaults to the API origin if omitted |
+
+API bases may include a deployment prefix, such as `https://api.example.com/v1`.
+Image URLs beginning with `/` resolve from the image origin; other relative URLs
+resolve beneath the configured image base path. Absolute image URLs are kept as
+provided. Restart development or rebuild the export after changing public settings.
+
+### Local legacy/backend settings
+
+These variables are used only by the separate backend and importer. Restart those
+processes after changing them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `PHOTO_API_PORT` | `4000` | Local photo backend port, listening on all network interfaces |
+| `PHOTO_API_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated exact frontend origins permitted by local CORS |
 | `PHOTO_DIRECTORY` | Required | Absolute path to the photo collection |
 | `PHOTO_INCOMING_DIRECTORY` | Required for the watcher | Absolute path to incoming photos |
 | `PHOTO_CACHE_DIRECTORY` | `.photo-cache/` in the application directory | Absolute writable cache path outside the photo collection |
@@ -120,7 +174,7 @@ after changing them.
 | `PHOTO_IMPORT_STABILITY_MS` | `3000` | Required file stability interval (500–60000 ms) |
 | `PHOTO_IMPORT_POLL_MS` | `250` | Stability polling interval (50–5000 ms) |
 
-The viewer scans only the photo directory's top level. JPG/JPEG, PNG, and WebP
+The local backend scans only the photo directory's top level. JPG/JPEG, PNG, and WebP
 extensions are case-insensitive; spaces and Unicode filenames are supported.
 File symlinks are excluded. Originals are read in place, never copied into
 `public/`, and never rewritten by the viewer.
@@ -129,7 +183,7 @@ The metadata catalog is cached for five seconds. Reload the page after that
 interval to see directory changes, including newly imported photos. Empty or
 unreadable directories show a reload or retry action.
 
-## Automatic photo import watcher
+## Local legacy/backend: automatic photo import watcher
 
 The optional importer runs as a separate Node.js utility. Configure both
 `PHOTO_DIRECTORY` and `PHOTO_INCOMING_DIRECTORY` in `.env.local`, then run this
@@ -177,23 +231,29 @@ npm run typecheck
 npm run build
 ```
 
-For browser tests, first configure a readable photo collection and build the
-application, then install Chromium and run Playwright:
+Browser tests serve the static export and start a separate backend with temporary
+generated photos; your configured photo directory and cache are not used. Build
+with the fixture endpoints, then install Chromium and run Playwright:
 
 ```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:4000 NEXT_PUBLIC_PHOTO_BASE_URL=http://127.0.0.1:4000 npm run build
 npx playwright install chromium
 npm run test:browser
 ```
 
-Browser tests start a local production server when needed. Outside CI, an existing
-server may be reused; set `TEST_BASE_URL` when testing an already-running server
-at another address. Alternatively, set `CHROME_PATH` to the absolute path of an
-installed Chrome executable.
+Playwright starts `npm run start` for the exported files and an isolated fixture
+backend on port 4000. Outside CI, it may reuse an existing frontend server. Set
+`TEST_BASE_URL` to use a running static frontend at another address. Set
+`TEST_API_BASE_URL` (and optionally `TEST_PHOTO_BASE_URL`) to use an already-running
+external backend instead of fixture generation; these URLs must match the values
+used to build the frontend. Alternatively, set `CHROME_PATH` to an installed
+Chrome executable instead of installing Playwright's Chromium.
 
-The real-photo browser tests need at least eight decodable photos. Resolution
-tests expect originals wider than 1600px after orientation, including the first
-and seventh photos in date order. Other browser cases use mock catalogs, including
-a 10,000-photo collection, to verify bounded DOM rendering.
+When using your own backend for browser tests, its collection needs at least eight
+decodable photos, with the first and seventh originals wider than 1600px after
+orientation. Mock catalog cases verify bounded rendering with 10,000 photos.
+Static shell tests also verify cross-origin metadata requests, unavailable-backend
+handling, and the absence of same-origin photo API routes.
 
 Automated tests cover date priority and malformed EXIF, metadata/cache
 invalidation, sorting, supported files and symlink rejection, image variants and
@@ -204,7 +264,13 @@ races, timestamp/EXIF preservation, cleanup, and source-change protection.
 
 ## Implementation details
 
-### Photo dates and API
+### Local backend photo dates and API
+
+The following filesystem and metadata logic runs in the separate local Node.js
+backend. The frontend imports only the browser-safe client in
+`src/lib/api/photoApi.ts`, which validates responses, resolves image URLs, and
+reports configuration or API errors through the existing retry UI. It never
+falls back to a same-origin Next.js API when configuration is missing.
 
 The public model remains:
 
@@ -218,7 +284,7 @@ type Photo = {
 };
 ```
 
-`GET /api/photos` returns photos sorted newest to oldest by the selected ISO
+`GET /photos` (also available as `/api/photos` locally) returns photos sorted newest to oldest by the selected ISO
 `takenAt`, with filename order as a stable tie-breaker. Date selection tries:
 
 1. Valid EXIF `DateTimeOriginal`, then EXIF `CreateDate`.
@@ -245,7 +311,8 @@ The server-only `loadPhotoDateDiagnostics()` exposes the chosen source
 (`dateTaken`, `dateModified`, or `dateCreated`) and EXIF tag for development.
 These fields and the filesystem directory path are excluded from public metadata.
 
-`GET /api/photos/[id]?size=small|medium|large|original` serves a cataloged image
+`GET /photos/[id]?size=small|medium|large|original` (with a legacy
+`/api/photos/[id]` alias) serves a cataloged image
 through an opaque stable ID. Omitting `size` streams the original for
 compatibility. `thumbnailUrl` points to the small variant; `originalUrl` points
 to `size=original`. Variants use WebP, while originals retain their MIME type.
@@ -293,7 +360,16 @@ isolated in `PhotoModal` for possible future native-viewer integration.
 
 ### Adaptive image resolution
 
-Cards select a variant by relative depth, independently of their geometry:
+Cards select a variant by relative depth, independently of their geometry.
+`getPhotoVariantUrl()` in the API client handles both relative and absolute
+external image endpoints using the existing `size` query contract. Other query
+parameters and fragments are retained, and original lightbox URLs stay unchanged.
+Fixed image assets without a variant contract are used as supplied. Future S3
+object-key variants or signatures bound to a specific size will need an explicit
+URL mapping/signing contract in Phase 2; changing a query cannot resize a fixed
+object by itself.
+
+The resolution thresholds remain:
 
 | Tier | Target width | Enter while approaching | Start preloading | Retain while retreating |
 | --- | --- | --- | --- | --- |
@@ -398,7 +474,9 @@ with portable filesystem APIs; use the completed-file handoff described above.
 | Photo catalog and dates | `src/lib/photoLoader.ts`, `photoDate.ts`, `src/types/photo.ts` |
 | Positioning and camera geometry | `src/lib/photoPosition.ts` |
 | Adaptive images and cache | `src/components/AdaptivePhotoImage.tsx`, `src/lib/photoResolution.ts`, `imagePreloader.ts`, `photoVariantCache.ts`, `photoRevision.ts` |
-| Photo API | `src/app/api/photos/` |
+| Browser API client | `src/lib/api/photoApi.ts` |
+| Local photo API and preserved handlers | `src/local-backend/photoServer.ts`, `src/local-backend/routes/` |
+| Local backend and static preview commands | `scripts/local-photo-server.ts`, `scripts/serve-static.ts` |
 | Importer | `scripts/photo-import-watcher.ts`, `src/lib/photoImport/` |
 | Automated tests | `tests/`, `tests/browser/`, `playwright.config.ts` |
 
@@ -429,4 +507,4 @@ with portable filesystem APIs; use the completed-file handoff described above.
 - No recursive photo folders, uploads, Windows-native photo viewer integration,
   authentication, automatic viewer refresh, persistent global duplicate index,
   systemd service, or import history database are included. Image variants are
-  generated by the viewer on demand, independently of the import watcher.
+  generated by the local backend on demand, independently of the import watcher.

@@ -1,3 +1,4 @@
+import { getBrowserPhotos, photoMetadataUrl } from "./photoApi";
 import { expect, test, type Page } from "@playwright/test";
 import type { Photo } from "../../src/types/photo";
 
@@ -9,10 +10,10 @@ async function travel(page: Page, cameraZ: number) {
   await expect.poll(async () => Number(await page.locator(".viewer-stage").getAttribute("data-camera-z"))).toBeCloseTo(cameraZ, 1);
 }
 async function catalog(page: Page, count: number): Promise<Photo[]> {
-  const photos: Photo[] = await (await page.request.get("/api/photos")).json();
+  const photos: Photo[] = await getBrowserPhotos(page.request);
   expect(photos.length).toBeGreaterThanOrEqual(count);
   const sample = photos.slice(0, count);
-  await page.route("**/api/photos", route => route.fulfill({ json: sample }));
+  await page.route(photoMetadataUrl, route => route.fulfill({ json: sample }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   return sample;
 }

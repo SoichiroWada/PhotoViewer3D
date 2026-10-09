@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1",
+    "start": "tsx scripts/serve-static.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --conditions=react-server --import tsx --test --test-timeout=30000 tests/*.test.ts",
     "test:browser": "playwright test",
-    "photo-watch": "tsx scripts/photo-import-watcher.ts"
+    "photo-watch": "tsx scripts/photo-import-watcher.ts",
+    "backend": "node --conditions=react-server --import tsx scripts/local-photo-server.ts"
   },
   "dependencies": {
     "chokidar": "5.0.0",

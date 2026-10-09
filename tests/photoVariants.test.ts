@@ -7,7 +7,7 @@ import path from "node:path";
 import { openPhotoVariant, createResizeLimiter } from "../src/lib/photoVariantCache";
 import { photoRevision } from "../src/lib/photoRevision";
 import { photoId } from "../src/lib/photoLoader";
-import { GET } from "../src/app/api/photos/[id]/route";
+import { GET } from "../src/local-backend/routes/photo";
 import type { PhotoTier } from "../src/lib/photoResolution";
 
 async function fixture() {

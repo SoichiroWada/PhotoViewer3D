@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Photo } from "@/types/photo";
+import { getPhotos } from "@/lib/api/photoApi";
 import {
   cameraLimit, cameraStep, clampCamera, createPhotoPositions, DEPTH_SPACING,
   visibleWindow, wheelDistance,
@@ -42,12 +43,7 @@ export default function PhotoViewer() {
   useEffect(() => {
     const controller = new AbortController();
     setLoadState("loading");
-    fetch("/api/photos", { signal: controller.signal, cache: "no-store" })
-      .then(async response => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Unable to load photos.");
-        return data as Photo[];
-      })
+    getPhotos({ signal: controller.signal })
       .then(data => {
         setPhotos(data);
         target.current = current.current = 0;

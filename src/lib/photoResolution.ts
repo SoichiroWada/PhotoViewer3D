@@ -1,4 +1,4 @@
-import type { Photo } from "@/types/photo";
+export { getPhotoVariantUrl as photoVariantUrl } from "./api/photoApi";
 
 export const PHOTO_WIDTHS = { small: 320, medium: 800, large: 1600 } as const;
 export type PhotoTier = keyof typeof PHOTO_WIDTHS;
@@ -19,14 +19,4 @@ export function preloadTier(relativeZ: number, current: PhotoTier): PhotoTier | 
   if (current === "small" && relativeZ <= 2400) return "medium";
   if (current === "medium" && relativeZ <= 800) return "large";
   return null;
-}
-
-export function photoVariantUrl(photo: Photo, size: PhotoSize): string {
-  const url = size === "original" ? photo.originalUrl : photo.thumbnailUrl;
-  // Keep non-API URLs usable for catalog fixtures and future external providers.
-  if (!url.startsWith("/api/photos/")) return url;
-  const [pathname, query = ""] = url.split("?");
-  const params = new URLSearchParams(query);
-  params.set("size", size);
-  return `${pathname}?${params}`;
 }
