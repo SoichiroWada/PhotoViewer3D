@@ -1,0 +1,25 @@
+{
+  "name": "photo-viewer-3d-infra",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test --test-timeout=60000 test/*.test.ts",
+    "synth": "cdk synth --no-lookups"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1148.0",
+    "@aws-sdk/lib-dynamodb": "3.1148.0",
+    "aws-cdk-lib": "2.273.0",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^22.0.0",
+    "aws-cdk": "2.1145.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.20.0",
+    "typescript": "5.9.3"
+  }
+}

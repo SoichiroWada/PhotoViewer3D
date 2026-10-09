@@ -27,3 +27,7 @@ test-results/
 
 # Static frontend export
 out/
+
+# AWS CDK generated output
+infra/cdk.out/
+infra/dist/

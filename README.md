@@ -56,12 +56,40 @@ Never put AWS credentials in them.
 AWS deployment is **not implemented in Phase 1**, and no AWS credentials or
 resources are needed for this workflow. The later target is Amplify Hosting for
 the frontend, API Gateway and Lambda for the API, DynamoDB for photo metadata,
-and S3 with CloudFront for images. Authentication, provisioning, and deployment
-will be addressed in later phases.
+and S3 with CloudFront for images. Phase 2 defines the initial infrastructure
+below; image delivery, hosting, authentication and deployment remain later work.
 
 Local filesystem, EXIF, Sharp cache, and importer implementations remain available
 as a separate legacy/local backend. They are not part of the browser runtime or
 static export. The viewer's design and navigation behavior are unchanged.
+
+## AWS migration: Phase 2 infrastructure foundation
+
+[`infra/`](infra/README.md) contains an isolated AWS CDK v2 / TypeScript project
+targeting Tokyo (`ap-northeast-1`) by default, with no hardcoded account ID. It
+defines private S3 photo storage, an on-demand DynamoDB catalog with a
+chronological index, a Node.js 22 Lambda, an API Gateway HTTP API (`GET /photos`),
+scoped IAM permissions and CloudWatch logs with 14-day retention.
+
+**No AWS resources have been deployed.** The local frontend/backend configuration
+is unchanged. The AWS API supports the existing five-field `Photo[]` contract
+and internal query pagination with documented safety limits. An empty catalog
+returns `[]`; nonempty catalogs require a future image-delivery URL resolver.
+
+Validate independently with Node.js 22 or newer:
+
+```bash
+cd infra
+npm install
+npm test
+npm run build
+npx cdk synth --no-lookups
+```
+
+Synthesis needs no AWS credentials or environment lookups. Deployment will
+require an external AWS profile/SSO or role and separate approval. See the
+[infrastructure guide](infra/README.md) for storage safety, schema, configurable
+CORS, pagination limits, outputs and future deployment commands.
 
 ## Quick start: static frontend with a local backend
 
@@ -366,8 +394,9 @@ external image endpoints using the existing `size` query contract. Other query
 parameters and fragments are retained, and original lightbox URLs stay unchanged.
 Fixed image assets without a variant contract are used as supplied. Future S3
 object-key variants or signatures bound to a specific size will need an explicit
-URL mapping/signing contract in Phase 2; changing a query cannot resize a fixed
-object by itself.
+URL mapping/signing contract in a later image-delivery phase; changing a query
+cannot resize a fixed object by itself. Phase 2 isolates URL generation but does
+not implement that delivery contract.
 
 The resolution thresholds remain:
 
