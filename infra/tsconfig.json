@@ -13,6 +13,6 @@
     "outDir": "dist",
     "sourceMap": true
   },
-  "include": ["bin/**/*.ts", "lib/**/*.ts", "lambda/**/*.ts", "test/**/*.ts"],
+  "include": ["bin/**/*.ts", "scripts/**/*.ts", "lib/**/*.ts", "lambda/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist", "cdk.out"]
 }

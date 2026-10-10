@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test --test-timeout=60000 test/*.test.ts",
     "synth": "cdk synth --no-lookups",
-    "deploy": "cdk deploy PhotoViewer3D -c siteDir=../out"
+    "deploy": "cdk deploy PhotoViewer3D -c siteDir=../out",
+    "migrate": "node --import tsx scripts/migrate-photos.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1148.0",
@@ -24,6 +25,7 @@
     "sharp": "0.35.5"
   },
   "devDependencies": {
+    "@aws-sdk/client-cloudformation": "3.1148.0",
     "@types/aws-lambda": "^8.10.0",
     "@types/node": "^22.0.0",
     "aws-cdk": "2.1145.0",
