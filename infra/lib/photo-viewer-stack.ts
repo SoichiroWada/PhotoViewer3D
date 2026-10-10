@@ -59,7 +59,18 @@ export class PhotoViewerStack extends Stack {
       retention: logs.RetentionDays.TWO_WEEKS,
       removalPolicy: RemovalPolicy.DESTROY,
     });
-    const role = new iam.Role(this, "ListPhotosRole", { assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com") });
+    // const role = new iam.Role(this, "ListPhotosRole", { assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com") });
+
+    const role = new iam.Role(this, "ListPhotosRole", {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+
+      permissionsBoundary: iam.ManagedPolicy.fromManagedPolicyArn(
+        this,
+        "ListPhotosBoundary",
+        "arn:aws:iam::511530786011:policy/PhotoViewer3D-Lambda-Boundary"
+      ),
+    });
+
     role.addToPolicy(new iam.PolicyStatement({
       actions: ["dynamodb:Query"],
       resources: [table.tableArn, `${table.tableArn}/index/${PHOTO_INDEX_NAME}`],
