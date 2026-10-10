@@ -1,18 +1,16 @@
+import path from "node:path";
 import { App } from "aws-cdk-lib";
 import { PhotoViewerStack } from "../lib/photo-viewer-stack";
 
 const app = new App();
-const configuredOrigins: unknown = app.node.tryGetContext("allowedOrigins");
-const allowedOrigins = configuredOrigins === undefined ? ["*"] :
-  typeof configuredOrigins === "string" ? configuredOrigins.split(",").map(value => value.trim()) :
-  configuredOrigins;
-if (!Array.isArray(allowedOrigins) || !allowedOrigins.every(origin => typeof origin === "string")) {
-  throw new Error("allowedOrigins must be a comma-separated string or an array of origins.");
-}
-new PhotoViewerStack(app, "PhotoViewerFoundation", {
+// `-c siteDir=../out` deploys the static frontend export; omit it for infra-only changes.
+const siteDir: unknown = app.node.tryGetContext("siteDir");
+if (siteDir !== undefined && typeof siteDir !== "string") throw new Error("siteDir must be a path.");
+new PhotoViewerStack(app, "PhotoViewer3D", {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: app.node.tryGetContext("region") ?? "ap-northeast-1",
   },
-  allowedOrigins,
+  siteDirectory: siteDir ? path.resolve(siteDir) : undefined,
+  photoTimeZone: app.node.tryGetContext("photoTimeZone"),
 });

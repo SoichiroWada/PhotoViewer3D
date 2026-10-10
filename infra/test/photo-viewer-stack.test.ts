@@ -4,123 +4,142 @@ import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { PhotoViewerStack } from "../lib/photo-viewer-stack";
 
-const template = Template.fromStack(new PhotoViewerStack(new App(), "TestFoundation", {
+const template = Template.fromStack(new PhotoViewerStack(new App(), "TestStack", {
   env: { region: "ap-northeast-1" },
 }));
+const resources = template.toJSON().Resources as Record<string, { Type: string; Properties: any; DeletionPolicy?: string }>;
+const ofType = (type: string) => Object.entries(resources).filter(([, value]) => value.Type === type);
 
-test("S3 blocks all public access, encrypts, versions and retains photo data", () => {
-  template.resourceCountIs("AWS::S3::Bucket", 1);
-  template.hasResource("AWS::S3::Bucket", {
-    DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain",
-    Properties: {
-      PublicAccessBlockConfiguration: {
-        BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true,
-      },
-      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } }] },
-      VersioningConfiguration: { Status: "Enabled" },
-      OwnershipControls: { Rules: [{ ObjectOwnership: "BucketOwnerEnforced" }] },
-      LifecycleConfiguration: { Rules: [Match.objectLike({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 }, Status: "Enabled" })] },
-      NotificationConfiguration: Match.absent(),
-    },
-  });
-  template.hasResourceProperties("AWS::S3::BucketPolicy", {
-    PolicyDocument: { Statement: Match.arrayWith([Match.objectLike({
-      Effect: "Deny", Action: "s3:*", Principal: { AWS: "*" }, Condition: { Bool: { "aws:SecureTransport": "false" } },
-    })]) },
-  });
-  const bucket = Object.values(template.findResources("AWS::S3::Bucket"))[0]!;
-  const rule = bucket.Properties.LifecycleConfiguration.Rules[0];
-  assert.equal(rule.ExpirationInDays, undefined);
-  assert.equal(rule.NoncurrentVersionExpiration, undefined);
-  template.resourceCountIs("Custom::S3AutoDeleteObjects", 0);
+test("all three buckets block public access, encrypt and require TLS", () => {
+  template.resourceCountIs("AWS::S3::Bucket", 3);
+  for (const [, bucket] of ofType("AWS::S3::Bucket")) {
+    assert.deepEqual(bucket.Properties.PublicAccessBlockConfiguration, {
+      BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true,
+    });
+    assert.equal(bucket.Properties.BucketEncryption.ServerSideEncryptionConfiguration[0].ServerSideEncryptionByDefault.SSEAlgorithm, "AES256");
+  }
+  for (const [, policy] of ofType("AWS::S3::BucketPolicy")) {
+    assert.ok(policy.Properties.PolicyDocument.Statement.some((statement: any) =>
+      statement.Effect === "Deny" && statement.Condition?.Bool?.["aws:SecureTransport"] === "false"));
+  }
 });
 
-test("DynamoDB is retained, protected, on-demand and indexed by collection and sortable date", () => {
-  template.resourceCountIs("AWS::DynamoDB::Table", 1);
+test("media bucket and catalog are retained; only uploads and the site are disposable", () => {
+  const [, media] = ofType("AWS::S3::Bucket").find(([id]) => id.startsWith("MediaBucket"))!;
+  assert.equal(media.DeletionPolicy, "Retain");
+  assert.deepEqual(media.Properties.VersioningConfiguration, { Status: "Enabled" });
+  const [, upload] = ofType("AWS::S3::Bucket").find(([id]) => id.startsWith("UploadBucket"))!;
+  assert.equal(upload.Properties.LifecycleConfiguration.Rules[0].ExpirationInDays, 7);
+  assert.deepEqual(upload.Properties.CorsConfiguration.CorsRules[0].AllowedMethods, ["POST"]);
   template.hasResource("AWS::DynamoDB::Table", {
-    DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain",
-    Properties: {
+    DeletionPolicy: "Retain",
+    Properties: Match.objectLike({
       BillingMode: "PAY_PER_REQUEST", DeletionProtectionEnabled: true,
       KeySchema: [{ AttributeName: "photoId", KeyType: "HASH" }],
-      AttributeDefinitions: Match.arrayWith([
-        { AttributeName: "photoId", AttributeType: "S" },
-        { AttributeName: "collectionId", AttributeType: "S" },
-        { AttributeName: "takenAtKey", AttributeType: "S" },
-      ]),
-      GlobalSecondaryIndexes: [{ IndexName: "collection-date-index", KeySchema: [
+      GlobalSecondaryIndexes: [Match.objectLike({ IndexName: "collection-date-index", KeySchema: [
         { AttributeName: "collectionId", KeyType: "HASH" }, { AttributeName: "takenAtKey", KeyType: "RANGE" },
-      ], Projection: { ProjectionType: "ALL" } }],
+      ] })],
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
-      SSESpecification: { SSEEnabled: true },
-    },
+    }),
   });
 });
 
-test("Lambda uses Node.js 22, bundled assets, table environment and no VPC", () => {
-  template.resourceCountIs("AWS::Lambda::Function", 1);
+test("every API route requires the Cognito JWT authorizer", () => {
+  template.resourceCountIs("AWS::ApiGatewayV2::Route", 3);
+  const keys = ofType("AWS::ApiGatewayV2::Route").map(([, route]) => {
+    assert.equal(route.Properties.AuthorizationType, "JWT");
+    assert.ok(route.Properties.AuthorizerId);
+    return route.Properties.RouteKey;
+  });
+  assert.deepEqual(keys.sort(), ["GET /api/photos", "POST /api/session", "POST /api/uploads"]);
+  template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
+    AuthorizerType: "JWT", IdentitySource: ["$request.header.Authorization"],
+  });
+  template.hasResourceProperties("AWS::ApiGatewayV2::Api", { CorsConfiguration: Match.absent() });
+});
+
+test("Cognito is invitation-only with a public PKCE client", () => {
+  template.hasResourceProperties("AWS::Cognito::UserPool", {
+    AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }),
+    UsernameAttributes: ["email"],
+    UserPoolTier: "LITE",
+  });
+  template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
+    GenerateSecret: false,
+    AllowedOAuthFlows: ["code"],
+    AllowedOAuthFlowsUserPoolClient: true,
+    SupportedIdentityProviders: ["COGNITO"],
+    PreventUserExistenceErrors: "ENABLED",
+  });
+});
+
+test("CloudFront serves site, API and signed-cookie media from one origin", () => {
+  const [, distribution] = ofType("AWS::CloudFront::Distribution")[0]!;
+  const config = distribution.Properties.DistributionConfig;
+  assert.equal(config.DefaultCacheBehavior.ViewerProtocolPolicy, "redirect-to-https");
+  const behaviors = Object.fromEntries(config.CacheBehaviors.map((behavior: any) => [behavior.PathPattern, behavior]));
+  assert.deepEqual(Object.keys(behaviors).sort(), ["/api/*", "/media/*"]);
+  assert.equal(behaviors["/media/*"].TrustedKeyGroups.length, 1);
+  assert.equal(behaviors["/api/*"].TrustedKeyGroups, undefined);
+  assert.equal(behaviors["/api/*"].AllowedMethods.length, 7);
+  template.resourceCountIs("AWS::CloudFront::OriginAccessControl", 2);
+  template.resourceCountIs("AWS::CloudFront::KeyGroup", 1);
+  // No error-page rewrites: an expired media cookie must surface as 403, not index.html.
+  assert.equal(config.CustomErrorResponses, undefined);
+});
+
+test("application Lambdas use Node.js 22 with dedicated roles and no managed policies", () => {
+  const app = ofType("AWS::Lambda::Function").filter(([id]) =>
+    ["ListPhotos", "Session", "CreateUpload", "ProcessPhoto", "SigningKeyFunction"].some(name => id.startsWith(name) && !id.includes("Provider")));
+  assert.equal(app.length, 5);
+  for (const [, fn] of app) {
+    assert.equal(fn.Properties.Runtime, "nodejs22.x");
+    assert.ok(fn.Properties.LoggingConfig.LogGroup);
+    assert.equal(fn.Properties.VpcConfig, undefined);
+  }
+  for (const [id, role] of ofType("AWS::IAM::Role")) {
+    if (["ListPhotos", "Session", "CreateUpload", "ProcessPhoto", "SigningKeyFunction"].some(name => id.startsWith(`${name}Role`))) {
+      assert.equal(role.Properties.ManagedPolicyArns, undefined, id);
+    }
+  }
   template.hasResourceProperties("AWS::Lambda::Function", {
-    Runtime: "nodejs22.x", Handler: "index.handler", MemorySize: 256, Timeout: 20,
-    Environment: { Variables: { PHOTO_TABLE_NAME: Match.anyValue(), PHOTO_COLLECTION_ID: "default" } },
-    Code: { S3Bucket: Match.anyValue(), S3Key: Match.anyValue() },
-    LoggingConfig: { LogGroup: Match.anyValue() }, VpcConfig: Match.absent(),
+    MemorySize: 2048, ReservedConcurrentExecutions: 10,
+    Environment: { Variables: Match.objectLike({ PHOTO_TIME_ZONE: "Asia/Tokyo" }) },
   });
-  template.hasResourceProperties("AWS::Logs::LogGroup", { RetentionInDays: 14 });
 });
 
-test("Lambda IAM allows only collection-scoped Query and scoped CloudWatch writes", () => {
-  template.resourceCountIs("AWS::IAM::Role", 1);
-  template.hasResourceProperties("AWS::IAM::Role", {
-    ManagedPolicyArns: Match.absent(),
-    AssumeRolePolicyDocument: { Statement: [{ Effect: "Allow", Action: "sts:AssumeRole", Principal: { Service: "lambda.amazonaws.com" } }], Version: "2012-10-17" },
-  });
-  const policies = Object.values(template.findResources("AWS::IAM::Policy"));
-  const statements = policies.flatMap(policy => policy.Properties.PolicyDocument.Statement);
-  const query = statements.filter(statement => [statement.Action].flat().includes("dynamodb:Query"));
-  assert.equal(query.length, 1);
-  assert.deepEqual([query[0].Action].flat(), ["dynamodb:Query"]);
-  assert.deepEqual(query[0].Condition, { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["default"] } });
-  assert.equal(query[0].Resource.length, 2);
-  const resourceText = JSON.stringify(query[0].Resource);
-  assert.ok(resourceText.includes("Arn"));
-  assert.ok(resourceText.includes("/index/collection-date-index"));
-  for (const statement of statements) {
-    assert.equal(statement.Effect, "Allow");
-    assert.ok([statement.Action].flat().every((action: string) =>
-      ["dynamodb:Query", "logs:CreateLogStream", "logs:PutLogEvents"].includes(action)));
-    assert.ok(![statement.Resource].flat().includes("*"));
-  }
-  assert.ok(statements.some(statement => [statement.Action].flat().includes("logs:PutLogEvents")));
+test("application IAM statements never use wildcard resources and match each function's job", () => {
+  const actionsFor = (prefix: string) => ofType("AWS::IAM::Policy")
+    .filter(([id]) => id.startsWith(`${prefix}RoleDefaultPolicy`))
+    .flatMap(([, policy]) => policy.Properties.PolicyDocument.Statement)
+    .flatMap((statement: any) => {
+      assert.ok(![statement.Resource].flat().includes("*"), `${prefix} uses a wildcard resource`);
+      return [statement.Action].flat();
+    });
+  const logs = ["logs:CreateLogStream", "logs:PutLogEvents"];
+  assert.deepEqual(actionsFor("ListPhotos").sort(), [...logs, "dynamodb:Query"].sort());
+  assert.ok(actionsFor("Session").every(action => logs.includes(action) || action.startsWith("ssm:Get") || action === "ssm:DescribeParameters"));
+  assert.ok(actionsFor("CreateUpload").every(action => logs.includes(action) || action.startsWith("s3:Put") || action === "s3:Abort*"));
+  const process = actionsFor("ProcessPhoto");
+  assert.ok(process.includes("dynamodb:PutItem") && process.includes("s3:DeleteObject*"));
+  assert.ok(!process.some(action => ["dynamodb:Scan", "dynamodb:DeleteItem", "s3:DeleteBucket"].includes(action)));
 });
 
-test("HTTP API exposes only GET /photos with configurable, noncredentialed CORS", () => {
-  template.resourceCountIs("AWS::ApiGatewayV2::Api", 1);
-  template.hasResourceProperties("AWS::ApiGatewayV2::Api", {
-    ProtocolType: "HTTP", CorsConfiguration: {
-      AllowOrigins: ["*"], AllowMethods: ["GET", "OPTIONS"], AllowHeaders: ["Content-Type"], AllowCredentials: false, MaxAge: 3600,
-    },
+test("uploads trigger processing only under incoming/", () => {
+  template.hasResourceProperties("Custom::S3BucketNotifications", {
+    NotificationConfiguration: { LambdaFunctionConfigurations: [Match.objectLike({
+      Events: ["s3:ObjectCreated:*"],
+      Filter: { Key: { FilterRules: [{ Name: "prefix", Value: "incoming/" }] } },
+    })] },
   });
-  template.resourceCountIs("AWS::ApiGatewayV2::Route", 1);
-  template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "GET /photos", AuthorizationType: "NONE" });
-  template.hasResourceProperties("AWS::ApiGatewayV2::Integration", { IntegrationType: "AWS_PROXY", PayloadFormatVersion: "2.0" });
 });
 
-test("stack outputs API base URL and storage identifiers without secrets or later-phase services", () => {
+test("outputs identify resources without secrets; site deployment is opt-in", () => {
   const outputs = template.toJSON().Outputs;
-  assert.deepEqual(Object.keys(outputs).sort(), ["PhotoApiUrl", "PhotoBucketName", "PhotoTableName"]);
-  assert.ok(JSON.stringify(outputs.PhotoApiUrl.Value).includes("ApiEndpoint"));
-  for (const type of ["AWS::CloudFront::Distribution", "AWS::Amplify::App", "AWS::Cognito::UserPool", "AWS::EC2::VPC"]) {
-    template.resourceCountIs(type, 0);
-  }
-});
-
-test("exact frontend CORS origins can be configured without embedding a LAN address", () => {
-  const origins = ["https://viewer.example.com", "http://localhost:3000"];
-  const custom = Template.fromStack(new PhotoViewerStack(new App(), "ConfiguredOrigins", { allowedOrigins: origins }));
-  custom.hasResourceProperties("AWS::ApiGatewayV2::Api", { CorsConfiguration: Match.objectLike({ AllowOrigins: origins }) });
-});
-
-test("rejects empty, mixed-wildcard or invalid CORS origins before synthesizing resources", () => {
-  for (const allowedOrigins of [[], ["*", "https://viewer.example.com"], ["https://viewer.example.com/path"], ["ftp://example.com"], ["https://user:pass@example.com"]]) {
-    assert.throws(() => new PhotoViewerStack(new App(), "InvalidOrigins", { allowedOrigins }));
-  }
+  assert.deepEqual(Object.keys(outputs).sort(), [
+    "CognitoDomain", "DistributionId", "MediaBucketName", "PhotoTableName", "SiteUrl", "UploadBucketName",
+    "UserPoolClientId", "UserPoolId",
+  ]);
+  assert.ok(!JSON.stringify(outputs).includes("PRIVATE KEY"));
+  template.resourceCountIs("Custom::CDKBucketDeployment", 0);
 });

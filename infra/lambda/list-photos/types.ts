@@ -1,4 +1,4 @@
-/** Future catalog records; optional processing fields are not needed by Phase 2. */
+/** Catalog records written by the process-photo Lambda. */
 export interface CatalogPhoto {
   photoId: string;
   collectionId: string;
@@ -15,6 +15,8 @@ export interface CatalogPhoto {
   height?: number;
 }
 
+export type PhotoVariantUrls = { small: string; medium: string; large: string };
+
 // Infrastructure remains independent of frontend compilation; contract tested.
 export type PublicPhoto = {
   id: string;
@@ -22,8 +24,9 @@ export type PublicPhoto = {
   thumbnailUrl: string;
   originalUrl: string;
   takenAt: string;
+  variants?: PhotoVariantUrls;
 };
-export type PhotoUrlResolver = (photo: CatalogPhoto) => { thumbnailUrl: string; originalUrl: string };
+export type PhotoUrls = { thumbnailUrl: string; originalUrl: string; variants?: PhotoVariantUrls };
+export type PhotoUrlResolver = (photo: CatalogPhoto) => PhotoUrls;
 
 export class CatalogLimitError extends Error {}
-export class PhotoDeliveryUnavailableError extends Error {}

@@ -121,11 +121,23 @@ test("returns the full newest-first public catalog across query pages, with stab
   assert.ok(!response.body!.includes("collectionId"));
 });
 
-test("nonempty Phase 2 catalog gives an explicit delivery-not-configured error instead of public S3 URLs", async () => {
-  const response = await handlerFor(mockClient([{ Items: [record()] }]).client, { resolveUrls: undefined }).handler(event);
-  assert.equal(response.statusCode, 503);
-  assert.deepEqual(JSON.parse(response.body!), { error: "Photo delivery is not configured yet." });
-  assert.ok(!response.body!.includes("originals/"));
+test("default resolver maps processed media keys to same-origin signed-cookie paths", async () => {
+  const item = { ...record("abc"), originalKey: "media/originals/abc.jpg",
+    smallKey: "media/variants/abc/small.webp", mediumKey: "media/variants/abc/medium.webp", largeKey: "media/variants/abc/large.webp" };
+  const response = await handlerFor(mockClient([{ Items: [item] }]).client, { resolveUrls: undefined }).handler(event);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body!), [{
+    id: "abc", filename: "abc.jpg", takenAt: item.takenAt,
+    thumbnailUrl: "/media/variants/abc/small.webp", originalUrl: "/media/originals/abc.jpg",
+    variants: { small: "/media/variants/abc/small.webp", medium: "/media/variants/abc/medium.webp", large: "/media/variants/abc/large.webp" },
+  }]);
+});
+
+test("default resolver rejects records without processed variants or outside the media prefix", async () => {
+  for (const item of [record(), { ...record(), originalKey: "../secret", smallKey: "media/a", mediumKey: "media/a", largeKey: "media/a" }]) {
+    const response = await handlerFor(mockClient([{ Items: [item] }]).client, { resolveUrls: undefined }).handler(event);
+    assert.equal(response.statusCode, 500);
+  }
 });
 
 test("DynamoDB errors stay generic publicly and include request diagnostics in logs", async () => {
