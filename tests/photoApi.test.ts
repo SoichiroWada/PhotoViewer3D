@@ -84,3 +84,24 @@ test("HTTP errors, invalid JSON, network failures, and cancellation reach the ca
   const controller = new AbortController(); controller.abort();
   await assert.rejects(api({}, { fetch: async (_, options) => { options?.signal?.throwIfAborted(); return Response.json([]); } }).getPhotos({ signal: controller.signal }), { name: "AbortError" });
 });
+
+test("same-origin deployments: root-relative bases, bearer tokens, and pre-rendered variants", async () => {
+  const awsPhoto = { ...photo, thumbnailUrl: "/media/variants/abc/small.webp", originalUrl: "/media/originals/abc.jpg",
+    variants: { small: "/media/variants/abc/small.webp", medium: "/media/variants/abc/medium.webp", large: "/media/variants/abc/large.webp" } };
+  let headers: HeadersInit | undefined;
+  const client = createPhotoApi({ apiBaseUrl: "/api", photoBaseUrl: "/", origin: "https://viewer.example.test",
+    getAccessToken: async () => "token-1",
+    fetch: async (url, options) => { assert.equal(url, "https://viewer.example.test/api/photos"); headers = options?.headers; return Response.json([awsPhoto]); } });
+  const [normalized] = await client.getPhotos();
+  assert.deepEqual(headers, { Authorization: "Bearer token-1" });
+  assert.equal(normalized.originalUrl, "https://viewer.example.test/media/originals/abc.jpg");
+  assert.equal(getPhotoVariantUrl(normalized, "small"), "https://viewer.example.test/media/variants/abc/small.webp");
+  assert.equal(getPhotoVariantUrl(normalized, "large"), "https://viewer.example.test/media/variants/abc/large.webp");
+  assert.equal(getPhotoVariantUrl(normalized, "original"), normalized.originalUrl);
+  await assert.rejects(createPhotoApi({ apiBaseUrl: "/api", origin: "https://viewer.example.test", getAccessToken: async () => null,
+    fetch: async () => { throw new Error("should not fetch"); } }).getPhotos(), /sign in again/);
+  for (const variants of [null, { small: "/a" }, { small: "/a", medium: "/b", large: "javascript:alert(1)" }]) {
+    await assert.rejects(createPhotoApi({ apiBaseUrl: "/api", origin: "https://viewer.example.test",
+      fetch: async () => Response.json([{ ...awsPhoto, variants }]) }).getPhotos());
+  }
+});

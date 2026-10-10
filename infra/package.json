@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test --test-timeout=60000 test/*.test.ts",
-    "synth": "cdk synth --no-lookups"
+    "synth": "cdk synth --no-lookups",
+    "deploy": "cdk deploy PhotoViewer3D -c siteDir=../out"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1148.0",

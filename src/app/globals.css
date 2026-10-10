@@ -89,13 +89,23 @@ kbd { padding: 0 4px; border: 1px solid #d7dfcf; border-radius: 3px; font: inher
 .photo-modal__image img { max-width: 100%; max-height: 68svh; width: auto; height: auto; object-fit: contain; }
 .photo-modal__image p { padding: 40px; }
 .photo-modal__footer { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 16px 24px; font-size: 12px; color: var(--muted); }
+.viewer--gate { position: relative; min-height: 100svh; }
+.viewer--gate .brand__mark { margin: 0 auto 18px; }
+.gate-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.upload-panel { position: fixed; z-index: 20; right: 24px; top: 112px; width: min(340px, calc(100vw - 32px)); padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #f7f9f0f7; box-shadow: 0 10px 30px #253a3514; font-size: 12px; }
+.upload-panel__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.upload-panel progress { width: 100%; accent-color: var(--accent); }
+.upload-panel p, .upload-panel ul { margin: 10px 0 0; color: var(--muted); line-height: 1.6; }
+.upload-panel ul { padding-left: 18px; max-height: 120px; overflow: auto; color: #8a4b3c; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .viewer-header { padding: 17px 20px; min-height: 91px; gap: 12px; }
   .brand { gap: 10px; }
   .brand h1 { font-size: 18px; }
   .brand__mark { transform: scale(.8); width: 30px; }
   .eyebrow { font-size: 8px; }
-  .header-actions { gap: 0; }
+  .header-actions { gap: 6px; }
+  .upload-panel { right: 16px; top: 100px; }
   .header-actions .button { padding: 9px; font-size: 10px; gap: 5px; }
   .photo-count { display: none; }
   .viewer-stage { min-height: 350px; height: calc(100svh - 260px); }

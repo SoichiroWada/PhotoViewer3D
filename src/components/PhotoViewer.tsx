@@ -12,10 +12,13 @@ import Corridor from "./Corridor";
 import CorridorYears from "./CorridorYears";
 import PhotoCard from "./PhotoCard";
 import PhotoModal from "./PhotoModal";
+import UploadButton from "./UploadButton";
+import { useAuth } from "./AuthGate";
 
 type LoadState = "loading" | "ready" | "error";
 
 export default function PhotoViewer() {
+  const auth = useAuth();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
@@ -43,7 +46,7 @@ export default function PhotoViewer() {
   useEffect(() => {
     const controller = new AbortController();
     setLoadState("loading");
-    getPhotos({ signal: controller.signal })
+    getPhotos({ signal: controller.signal, getAccessToken: auth.mode === "cognito" ? auth.getAccessToken : undefined })
       .then(data => {
         setPhotos(data);
         target.current = current.current = 0;
@@ -56,7 +59,7 @@ export default function PhotoViewer() {
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [reload]);
+  }, [reload, auth]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -123,6 +126,10 @@ export default function PhotoViewer() {
         <div className="header-actions">
           <span className="photo-count">{loadState === "ready" ? `${photos.length} photos` : "Your photo collection"}</span>
           <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>
+          {auth.mode === "cognito" && <>
+            <UploadButton getAccessToken={auth.getAccessToken} onUploaded={() => setReload(value => value + 1)} />
+            <button className="button" onClick={auth.signOut} title={auth.email ?? undefined}>Sign out</button>
+          </>}
         </div>
       </header>
 
@@ -156,7 +163,7 @@ export default function PhotoViewer() {
         <span className="stage-label"><span className="status-dot" /> {atEnd ? "End of the collection" : "Memories in perspective"}</span>
         {loadState === "loading" && <div className="viewer-message" role="status"><span className="loader" /><h2>Opening your collection</h2><p>Bringing your memories into view.</p></div>}
         {loadState === "error" && <div className="viewer-message" role="alert"><h2>Couldn’t open the collection</h2><p>{error}</p><button className="button button--primary" onClick={() => setReload(value => value + 1)}>Try again</button></div>}
-        {loadState === "ready" && !photos.length && <div className="viewer-message"><h2>Your corridor is waiting</h2><p>Add JPG, PNG, or WebP images to the configured photo directory.</p><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
+        {loadState === "ready" && !photos.length && <div className="viewer-message"><h2>Your corridor is waiting</h2><p>{auth.mode === "cognito" ? "Use Upload to add JPG, PNG, or WebP photos." : "Add JPG, PNG, or WebP images to the configured photo directory."}</p><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
         {atEnd && <div className="viewer-message viewer-message--end"><p className="eyebrow">The beginning of your story</p><h2>You’ve reached the oldest memory.</h2><button className="button button--primary" onClick={returnToPresent}>Return to present</button></div>}
       </div>
 

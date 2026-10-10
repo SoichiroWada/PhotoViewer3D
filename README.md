@@ -6,10 +6,9 @@ timeline with the mouse wheel, keyboard, touch gestures, or timeline slider, and
 open any photo in a full-resolution lightbox.
 
 Built with Next.js, React, and TypeScript, the viewer uses CSS 3D transforms and
-perspective to create depth. On this migration branch, the frontend fetches photo
-metadata and images from configurable external endpoints. A separate local Node.js
-backend preserves capture-date ordering and cached variants without changing the
-originals.
+perspective to create depth. It runs either on AWS (serverless, with sign-in and
+uploads) or against a local Node.js backend that preserves capture-date ordering
+and cached variants without changing the originals.
 
 ## Features
 
@@ -41,55 +40,33 @@ originals.
 - **Chokidar** — incoming photo directory watcher.
 - **Playwright** — browser tests.
 
-## AWS migration: Phase 1
+## Running on AWS
 
-This branch, `migrate-to-aws-static`, exports the frontend as static HTML, CSS,
-and JavaScript with Next.js `output: "export"`. `npm run build` generates `out/`,
-which can be served without a Next.js server. See the [Next.js static export
-guide](https://nextjs.org/docs/app/guides/static-exports).
+The application runs serverless on AWS in Tokyo:
+- CloudFront serves the static Next.js export, the API, and the photos from a
+  single origin.
+- Cognito handles invitation-only sign-in through the Hosted UI with PKCE.
+- API Gateway and Lambda serve the API, and DynamoDB holds the photo catalog.
+- Photos are stored in private S3 buckets and delivered with CloudFront signed
+  cookies.
 
-Metadata comes from `<NEXT_PUBLIC_API_BASE_URL>/photos`. Relative image URLs
-resolve against `NEXT_PUBLIC_PHOTO_BASE_URL`; absolute HTTP/HTTPS URLs are
-preserved. These public values are embedded at build time and are not secrets.
-Never put AWS credentials in them.
-
-AWS deployment is **not implemented in Phase 1**, and no AWS credentials or
-resources are needed for this workflow. The later target is Amplify Hosting for
-the frontend, API Gateway and Lambda for the API, DynamoDB for photo metadata,
-and S3 with CloudFront for images. Phase 2 defines the initial infrastructure
-below; image delivery, hosting, authentication and deployment remain later work.
-
-Local filesystem, EXIF, Sharp cache, and importer implementations remain available
-as a separate legacy/local backend. They are not part of the browser runtime or
-static export. The viewer's design and navigation behavior are unchanged.
-
-## AWS migration: Phase 2 infrastructure foundation
-
-[`infra/`](infra/README.md) contains an isolated AWS CDK v2 / TypeScript project
-targeting Tokyo (`ap-northeast-1`) by default, with no hardcoded account ID. It
-defines private S3 photo storage, an on-demand DynamoDB catalog with a
-chronological index, a Node.js 22 Lambda, an API Gateway HTTP API (`GET /photos`),
-scoped IAM permissions and CloudWatch logs with 14-day retention.
-
-**No AWS resources have been deployed.** The local frontend/backend configuration
-is unchanged. The AWS API supports the existing five-field `Photo[]` contract
-and internal query pagination with documented safety limits. An empty catalog
-returns `[]`; nonempty catalogs require a future image-delivery URL resolver.
-
-Validate independently with Node.js 22 or newer:
+Signed-in users can upload photos from the viewer. A Lambda function then
+extracts the capture date, removes duplicates, and generates the 320/800/1600px
+variants.
 
 ```bash
-cd infra
-npm install
-npm test
-npm run build
-npx cdk synth --no-lookups
+npm run build:aws          # static export that calls /api and loads /media
+cd infra && npx cdk deploy PhotoViewer3D -c siteDir=../out --profile <profile>
 ```
 
-Synthesis needs no AWS credentials or environment lookups. Deployment will
-require an external AWS profile/SSO or role and separate approval. See the
-[infrastructure guide](infra/README.md) for storage safety, schema, configurable
-CORS, pagination limits, outputs and future deployment commands.
+See the [infrastructure guide](infra/README.md) for the architecture, security
+model, inviting users, costs and validation (`cd infra && npm test`).
+
+The frontend chooses its mode at runtime:
+- If the deployment publishes `/auth-config.json`, the viewer requires sign-in
+  and uses the AWS API.
+- Otherwise it runs unauthenticated against the local backend described below,
+  exactly as before.
 
 ## Quick start: static frontend with a local backend
 
@@ -533,7 +510,10 @@ with portable filesystem APIs; use the completed-file handoff described above.
   Inspect them manually before cleanup to avoid interfering with another
   importer. Successfully published photos are complete; sources left after a
   crash are rechecked on restart. Very long names may not permit collision suffixes.
-- No recursive photo folders, uploads, Windows-native photo viewer integration,
+- On AWS, photos cannot yet be deleted or renamed from the viewer; remove them
+  from the media bucket and catalog manually. The API returns the whole catalog
+  in one response, up to 5,000 photos or 4 MiB.
+- In local mode, no recursive photo folders, uploads, Windows-native photo viewer integration,
   authentication, automatic viewer refresh, persistent global duplicate index,
   systemd service, or import history database are included. Image variants are
   generated by the local backend on demand, independently of the import watcher.
