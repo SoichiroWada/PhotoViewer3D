@@ -45,13 +45,13 @@ test("media bucket and catalog are retained; only uploads and the site are dispo
 });
 
 test("every API route requires the Cognito JWT authorizer", () => {
-  template.resourceCountIs("AWS::ApiGatewayV2::Route", 3);
+  template.resourceCountIs("AWS::ApiGatewayV2::Route", 4);
   const keys = ofType("AWS::ApiGatewayV2::Route").map(([, route]) => {
     assert.equal(route.Properties.AuthorizationType, "JWT");
     assert.ok(route.Properties.AuthorizerId);
     return route.Properties.RouteKey;
   });
-  assert.deepEqual(keys.sort(), ["GET /api/photos", "POST /api/session", "POST /api/uploads"]);
+  assert.deepEqual(keys.sort(), ["GET /api/photos", "POST /api/photos/delete", "POST /api/session", "POST /api/uploads"]);
   template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
     AuthorizerType: "JWT", IdentitySource: ["$request.header.Authorization"],
   });
@@ -123,6 +123,7 @@ test("application IAM statements never use wildcard resources and match each fun
   const process = actionsFor("ProcessPhoto");
   assert.ok(process.includes("dynamodb:PutItem") && process.includes("s3:DeleteObject*"));
   assert.ok(!process.some(action => ["dynamodb:Scan", "dynamodb:DeleteItem", "s3:DeleteBucket"].includes(action)));
+  assert.deepEqual(actionsFor("DeletePhotos").sort(), [...logs, "dynamodb:DeleteItem", "dynamodb:GetItem", "s3:DeleteObject*"].sort());
 });
 
 test("uploads trigger processing only under incoming/", () => {

@@ -98,7 +98,51 @@ kbd { padding: 0 4px; border: 1px solid #d7dfcf; border-radius: 3px; font: inher
 .upload-panel progress { width: 100%; accent-color: var(--accent); }
 .upload-panel p, .upload-panel ul { margin: 10px 0 0; color: var(--muted); line-height: 1.6; }
 .upload-panel ul { padding-left: 18px; max-height: 120px; overflow: auto; color: #8a4b3c; overflow-wrap: anywhere; }
+.view-switch { display: inline-flex; border: 1px solid #cdd5ca; border-radius: 6px; overflow: hidden; }
+.view-switch__option { border: 0; background: #ffffff80; color: var(--ink); padding: 11px 14px; font-size: 12px; }
+.view-switch__option + .view-switch__option { border-left: 1px solid #cdd5ca; }
+.view-switch__option:hover { background: #e8ede5; }
+.view-switch__option[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.grid-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.grid-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 16px; padding: 12px 42px; background: var(--paper); border-bottom: 1px solid var(--line); font-size: 12px; }
+.grid-toolbar__sort { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); }
+.grid-toolbar select { font: inherit; color: var(--ink); padding: 7px 10px; border: 1px solid #cdd5ca; border-radius: 6px; background: #fff; }
+/* Explorer "extra large icons": 6 columns on wide screens, 5 on typical desktops, ~4 rows visible. */
+.photo-grid { --grid-columns: 5; list-style: none; margin: 0; padding: 20px 42px 42px; display: grid; grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr)); gap: 12px 28px; }
+.photo-tile { position: relative; content-visibility: auto; contain-intrinsic-size: auto 240px; border: 1px solid transparent; border-radius: 4px; }
+.photo-tile:hover { background: #e8ede5; border-color: #d3dccf; }
+.photo-tile--selected, .photo-tile--selected:hover { background: #dbe7de; border-color: #8fb19c; }
+.photo-tile__open { display: flex; flex-direction: column; align-items: center; width: 100%; padding: 8px 8px 10px; border: 0; background: transparent; color: inherit; }
+/* Like Explorer: no frame, each photo keeps its shape and sits on a shared baseline. */
+.photo-tile__image { display: flex; align-items: flex-end; justify-content: center; width: 100%; aspect-ratio: 4 / 3; max-height: calc((100svh - 230px) / 4); }
+.photo-tile__image img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; box-shadow: 0 1px 4px #0003; }
+.photo-tile__filename { max-width: 100%; padding-top: 8px; font-size: 12px; color: #3f4b44; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-tile__check { position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); cursor: pointer; opacity: 0; }
+.photo-tile:hover .photo-tile__check, .photo-tile__check:focus-visible, .photo-tile__check:checked, .photo-grid--selecting .photo-tile__check { opacity: 1; }
+@media (hover: none) { .photo-tile__check { opacity: 1; } }
+.grid-toolbar { flex-wrap: wrap; }
+.grid-toolbar__selection { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.grid-toolbar__count { color: var(--muted); }
+.grid-toolbar .button { padding: 8px 14px; }
+.button--danger { color: #fff; background: #a5432f; border-color: #a5432f; }
+.button--danger:hover:not(:disabled) { background: #85341f; }
+.confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 24px; border: 1px solid #dbe1d3; border-radius: 12px; background: var(--paper); color: var(--ink); box-shadow: 0 30px 90px #112b2460; }
+.confirm-dialog::backdrop { background: #152921b3; }
+.confirm-dialog h2 { margin: 0 0 12px; font-size: 18px; font-weight: 500; }
+.confirm-dialog__message { margin: 0; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.confirm-dialog__error { margin: 12px 0 0; font-size: 12px; color: #8a4b3c; }
+.confirm-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.grid-message { margin: 80px auto; width: min(90%, 450px); text-align: center; }
+.grid-message h2 { font-size: 21px; font-weight: 500; margin: 0 0 10px; }
+.grid-message p { font-size: 13px; color: #74806e; }
+@media (min-width: 1600px) { .photo-grid { --grid-columns: 6; } }
+@media (max-width: 1100px) { .photo-grid { --grid-columns: 4; } }
+@media (max-width: 800px) { .photo-grid { --grid-columns: 3; } }
 @media (max-width: 640px) {
+  .view-switch__option { padding: 9px; font-size: 10px; }
+  .grid-toolbar { padding: 10px 16px; }
+  .photo-grid { --grid-columns: 2; padding: 12px 16px 32px; gap: 8px; }
+  .grid-toolbar__selection { margin-left: 0; }
   .viewer-header { padding: 17px 20px; min-height: 91px; gap: 12px; }
   .brand { gap: 10px; }
   .brand h1 { font-size: 18px; }

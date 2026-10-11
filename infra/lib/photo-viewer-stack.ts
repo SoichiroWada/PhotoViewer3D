@@ -249,11 +249,20 @@ export class PhotoViewerStack extends Stack {
     table.grant(processPhoto, "dynamodb:GetItem", "dynamodb:PutItem");
     uploadBucket.addEventNotification(s3.EventType.OBJECT_CREATED, new s3n.LambdaDestination(processPhoto), { prefix: INCOMING_PREFIX });
 
+    const deletePhotos = createFunction("DeletePhotos", "delete-photos", {
+      timeout: Duration.seconds(30),
+      environment: { PHOTO_TABLE_NAME: table.tableName, MEDIA_BUCKET_NAME: mediaBucket.bucketName },
+    });
+    table.grant(deletePhotos, "dynamodb:GetItem", "dynamodb:DeleteItem");
+    // The bucket is versioned, so this only adds delete markers; noncurrent versions stay recoverable for 30 days.
+    mediaBucket.grantDelete(deletePhotos, `${MEDIA_PREFIX}/*`);
+
     // ------------------------------------------------------------ routes
     for (const [routePath, method, fn] of [
       ["/api/photos", HttpMethod.GET, listPhotos],
       ["/api/session", HttpMethod.POST, session],
       ["/api/uploads", HttpMethod.POST, createUpload],
+      ["/api/photos/delete", HttpMethod.POST, deletePhotos],
     ] as const) {
       api.addRoutes({
         path: routePath, methods: [method], authorizer,

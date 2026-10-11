@@ -52,3 +52,30 @@ export async function uploadPhoto(file: File, getAccessToken: TokenSource, onPro
     request.send(form);
   });
 }
+
+export type DeletePhotosResult = { deleted: string[]; failed: { id: string; error: string }[] };
+/** Matches MAX_DELETE_IDS in the delete-photos Lambda. */
+const DELETE_BATCH = 100;
+
+/** Deletes in batches; a failed batch marks its photos failed instead of aborting the rest. */
+export async function deletePhotos(ids: string[], getAccessToken: TokenSource, fetcher: typeof fetch = fetch): Promise<DeletePhotosResult> {
+  const result: DeletePhotosResult = { deleted: [], failed: [] };
+  for (let start = 0; start < ids.length; start += DELETE_BATCH) {
+    const batch = ids.slice(start, start + DELETE_BATCH);
+    try {
+      const response = await fetcher(apiUrl("photos/delete"), {
+        method: "POST", cache: "no-store", credentials: "omit",
+        headers: { Authorization: await authorized(getAccessToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: batch }),
+      });
+      if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete photos"));
+      const data = await response.json() as DeletePhotosResult;
+      result.deleted.push(...data.deleted);
+      result.failed.push(...data.failed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to delete photos.";
+      result.failed.push(...batch.map(id => ({ id, error: message })));
+    }
+  }
+  return result;
+}
