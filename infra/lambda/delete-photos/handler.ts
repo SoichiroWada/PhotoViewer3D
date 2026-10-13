@@ -1,5 +1,6 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { MEDIA_PREFIX } from "../../lib/catalog-config";
+import { isDemoCaller } from "../../lib/demo-config";
 
 /** One request covers a screenful of selections; larger batches are split by the client. */
 export const MAX_DELETE_IDS = 100;
@@ -40,6 +41,7 @@ export async function deletePhoto(photoId: string, deps: DeleteDependencies): Pr
 export function createDeleteHandler(deps: DeleteDependencies) {
   const log = deps.logger ?? console;
   return async (event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyStructuredResultV2> => {
+    if (isDemoCaller(event.requestContext.authorizer?.jwt?.claims)) return json(403, { error: "Deleting is not available in demo mode." });
     let body: unknown;
     try {
       body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "");

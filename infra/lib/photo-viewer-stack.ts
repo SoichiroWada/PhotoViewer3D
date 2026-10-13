@@ -14,10 +14,11 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { NodejsFunction, OutputFormat, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
-import { HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
+import { CfnStage, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { INCOMING_PREFIX, MEDIA_PREFIX, PHOTO_COLLECTION_ID, PHOTO_INDEX_NAME } from "./catalog-config";
+import { DEMO_GROUP } from "./demo-config";
 
 export interface PhotoViewerStackProps extends StackProps {
   /** Static export directory (e.g. `../out`). When omitted the frontend is not deployed. */
@@ -212,7 +213,22 @@ export class PhotoViewerStack extends Stack {
       idTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.days(30),
     });
-    const authorizer = new HttpUserPoolAuthorizer("CognitoAuthorizer", userPool, { userPoolClients: [webClient] });
+    // Demo visitors are signed in by DemoLogin, never through the Hosted UI, and may not edit their attributes.
+    const demoClient = userPool.addClient("DemoClient", {
+      generateSecret: false,
+      authFlows: { adminUserPassword: true },
+      disableOAuth: true,
+      supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
+      writeAttributes: new cognito.ClientAttributes(),
+      preventUserExistenceErrors: true,
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
+    });
+    new cognito.CfnUserPoolGroup(this, "DemoGroup", {
+      userPoolId: userPool.userPoolId, groupName: DEMO_GROUP,
+      description: "Shared demo account: view only; upload and delete APIs refuse it.",
+    });
+    const authorizer = new HttpUserPoolAuthorizer("CognitoAuthorizer", userPool, { userPoolClients: [webClient, demoClient] });
 
     // ----------------------------------------------------------- uploads
     const uploadBucket = new s3.Bucket(this, "UploadBucket", {
@@ -257,7 +273,24 @@ export class PhotoViewerStack extends Stack {
     // The bucket is versioned, so this only adds delete markers; noncurrent versions stay recoverable for 30 days.
     mediaBucket.grantDelete(deletePhotos, `${MEDIA_PREFIX}/*`);
 
+    // Serialized so password resets never race; it also caps what an anonymous caller can cost.
+    const demoLogin = createFunction("DemoLogin", "demo-login", {
+      reservedConcurrentExecutions: 1,
+      environment: { USER_POOL_ID: userPool.userPoolId, DEMO_CLIENT_ID: demoClient.userPoolClientId },
+    });
+    userPool.grant(demoLogin, "cognito-idp:AdminCreateUser", "cognito-idp:AdminSetUserPassword",
+      "cognito-idp:AdminAddUserToGroup", "cognito-idp:AdminInitiateAuth");
+
     // ------------------------------------------------------------ routes
+    // The only unauthenticated route; it is throttled well below Cognito's account quotas.
+    api.addRoutes({
+      path: "/api/demo-login", methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration("DemoLoginIntegration", demoLogin),
+    });
+    // `routeSettings` is untyped JSON, so it takes CloudFormation's own key casing.
+    (api.defaultStage!.node.defaultChild as CfnStage).routeSettings = {
+      "POST /api/demo-login": { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 },
+    };
     for (const [routePath, method, fn] of [
       ["/api/photos", HttpMethod.GET, listPhotos],
       ["/api/session", HttpMethod.POST, session],

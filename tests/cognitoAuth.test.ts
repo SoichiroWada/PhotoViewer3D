@@ -115,6 +115,34 @@ test("signOut revokes the refresh token and leaves through the Hosted UI logout"
   assert.equal(logout.searchParams.get("logout_uri"), "https://viewer.example.test/");
 });
 
+test("demo sign-in needs no Hosted UI, renews by asking for demo tokens again, and signs out locally", async () => {
+  const demoToken = (access: string) => Response.json({
+    access_token: jwt({ "cognito:groups": ["demo"], n: access }), id_token: jwt({ email: "demo@photoviewer3d.invalid" }), expires_in: 3600 });
+  const { env, requests, assigned, advance } = environment("https://viewer.example.test/", [demoToken("1"), demoToken("2")]);
+  env.storage.setItem("photoViewer3d.refreshToken", "stale");
+  const auth = createCognitoAuth(config, env, "https://viewer.example.test/api/demo-login");
+  await auth.signInDemo();
+  assert.equal(requests[0]!.url, "https://viewer.example.test/api/demo-login");
+  assert.equal(env.storage.getItem("photoViewer3d.refreshToken"), null);
+  assert.ok(auth.isDemo());
+  assert.equal(auth.email(), "demo@photoviewer3d.invalid");
+  advance(3600_000);
+  assert.equal(decodeJwtPayload((await auth.getAccessToken())!).n, "2");
+  assert.equal(requests[1]!.url, "https://viewer.example.test/api/demo-login");
+  await auth.signOut();
+  assert.equal(requests.length, 2); // Nothing to revoke.
+  assert.deepEqual(assigned, ["https://viewer.example.test/"]);
+  assert.equal(env.storage.getItem("photoViewer3d.demo"), null);
+});
+
+test("a regular sign-in is not a demo", async () => {
+  const { env } = environment("https://viewer.example.test/", [tokenResponse()]);
+  env.storage.setItem("photoViewer3d.refreshToken", "refresh-1");
+  const auth = createCognitoAuth(config, env);
+  await auth.getAccessToken();
+  assert.equal(auth.isDemo(), false);
+});
+
 test("auth config: missing file means local mode; malformed settings are rejected", async () => {
   assert.equal(await loadAuthConfig(async () => new Response("", { status: 404 })), null);
   assert.equal(await loadAuthConfig(async () => new Response("", { status: 403 })), null);

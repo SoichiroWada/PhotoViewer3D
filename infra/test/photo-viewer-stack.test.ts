@@ -44,9 +44,18 @@ test("media bucket and catalog are retained; only uploads and the site are dispo
   });
 });
 
-test("every API route requires the Cognito JWT authorizer", () => {
-  template.resourceCountIs("AWS::ApiGatewayV2::Route", 4);
-  const keys = ofType("AWS::ApiGatewayV2::Route").map(([, route]) => {
+test("every API route except the throttled demo sign-in requires the Cognito JWT authorizer", () => {
+  template.resourceCountIs("AWS::ApiGatewayV2::Route", 5);
+  const routes = ofType("AWS::ApiGatewayV2::Route");
+  const [[, demo]] = routes.filter(([, route]) => route.Properties.RouteKey === "POST /api/demo-login") as [[string, any]];
+  assert.equal(demo.Properties.AuthorizationType, "NONE");
+  template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
+    RouteSettings: { "POST /api/demo-login": { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 } },
+  });
+  template.hasResourceProperties("AWS::Lambda::Function", {
+    ReservedConcurrentExecutions: 1, Environment: { Variables: Match.objectLike({ DEMO_CLIENT_ID: Match.anyValue() }) },
+  });
+  const keys = routes.filter(([, route]) => route !== demo).map(([, route]) => {
     assert.equal(route.Properties.AuthorizationType, "JWT");
     assert.ok(route.Properties.AuthorizerId);
     return route.Properties.RouteKey;
@@ -56,6 +65,19 @@ test("every API route requires the Cognito JWT authorizer", () => {
     AuthorizerType: "JWT", IdentitySource: ["$request.header.Authorization"],
   });
   template.hasResourceProperties("AWS::ApiGatewayV2::Api", { CorsConfiguration: Match.absent() });
+});
+
+test("the demo group exists and its client signs in only server-side, without attribute writes", () => {
+  template.hasResourceProperties("AWS::Cognito::UserPoolGroup", { GroupName: "demo" });
+  template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
+    GenerateSecret: false,
+    ExplicitAuthFlows: Match.arrayWith(["ALLOW_ADMIN_USER_PASSWORD_AUTH"]),
+    AllowedOAuthFlowsUserPoolClient: false,
+    WriteAttributes: [],
+  });
+  const [[, authorizer]] = ofType("AWS::ApiGatewayV2::Authorizer");
+  const audience = JSON.stringify(authorizer!.Properties.JwtConfiguration.Audience);
+  assert.ok(audience.includes("UserPoolWebClient") && audience.includes("UserPoolDemoClient"));
 });
 
 test("Cognito is invitation-only with a public PKCE client", () => {

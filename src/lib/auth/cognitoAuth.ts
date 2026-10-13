@@ -16,6 +16,9 @@ type Environment = {
 
 const REFRESH_KEY = "photoViewer3d.refreshToken";
 const PKCE_KEY = "photoViewer3d.pkce";
+/** Set while signed in as the shared demo user, which has no refresh token and re-requests demo tokens instead. */
+const DEMO_KEY = "photoViewer3d.demo";
+const DEMO_GROUP = "demo";
 const SCOPES = "openid email profile";
 
 function base64Url(bytes: Uint8Array): string {
@@ -55,7 +58,7 @@ export function decodeJwtPayload(token: string): Record<string, unknown> {
   } catch { return {}; }
 }
 
-export function createCognitoAuth(config: AuthConfig, env: Environment) {
+export function createCognitoAuth(config: AuthConfig, env: Environment, demoLoginUrl = "/api/demo-login") {
   const redirectUri = `${env.location.origin}/`;
   const now = env.now ?? Date.now;
   let tokens: Tokens | null = null;
@@ -82,6 +85,13 @@ export function createCognitoAuth(config: AuthConfig, env: Environment) {
     if (typeof data.refresh_token === "string") env.storage.setItem(REFRESH_KEY, data.refresh_token);
   }
 
+  async function demoTokens(): Promise<Record<string, unknown>> {
+    const response = await env.fetch(demoLoginUrl, { method: "POST", cache: "no-store", credentials: "omit" });
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : `Unable to start the demo (HTTP ${response.status}).`);
+    return data;
+  }
+
   return {
     async signIn() {
       const verifier = randomString(48);
@@ -93,6 +103,13 @@ export function createCognitoAuth(config: AuthConfig, env: Environment) {
         state, code_challenge_method: "S256", code_challenge: await pkceChallenge(verifier),
       }).toString();
       env.location.assign(url.href);
+    },
+
+    /** Signs in as the shared, view-only demo user without the Hosted UI. */
+    async signInDemo() {
+      store(await demoTokens());
+      env.storage.removeItem(REFRESH_KEY);
+      env.storage.setItem(DEMO_KEY, "1");
     },
 
     /** Completes a Hosted UI redirect; returns false when the URL is not a callback. */
@@ -108,12 +125,19 @@ export function createCognitoAuth(config: AuthConfig, env: Environment) {
       const pkce = saved ? JSON.parse(saved) as { verifier?: string; state?: string } : {};
       if (!pkce.verifier || pkce.state !== url.searchParams.get("state")) throw new Error("Sign-in could not be verified. Please try again.");
       store(await tokenRequest({ grant_type: "authorization_code", code: code!, redirect_uri: redirectUri, code_verifier: pkce.verifier }));
+      env.storage.removeItem(DEMO_KEY);
       return true;
     },
 
     /** A valid access token, refreshing when it is within a minute of expiry. */
     async getAccessToken(): Promise<string | null> {
       if (tokens && tokens.expiresAt - 60_000 > now()) return tokens.accessToken;
+      if (env.storage.getItem(DEMO_KEY)) {
+        refreshing ??= demoTokens()
+          .then(data => { store(data); return tokens!.accessToken; })
+          .finally(() => { refreshing = null; });
+        return refreshing;
+      }
       const refreshToken = env.storage.getItem(REFRESH_KEY);
       if (!refreshToken) return null;
       refreshing ??= tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken })
@@ -132,7 +156,19 @@ export function createCognitoAuth(config: AuthConfig, env: Environment) {
       return typeof claims.email === "string" ? claims.email : null;
     },
 
+    /** Only a hint for the UI; the upload and delete APIs check the token's groups themselves. */
+    isDemo(): boolean {
+      const groups = tokens ? decodeJwtPayload(tokens.accessToken)["cognito:groups"] : undefined;
+      return Array.isArray(groups) && groups.includes(DEMO_GROUP);
+    },
+
     async signOut() {
+      if (env.storage.getItem(DEMO_KEY)) {
+        env.storage.removeItem(DEMO_KEY);
+        tokens = null;
+        env.location.assign(redirectUri); // The demo never had a Hosted UI session.
+        return;
+      }
       const refreshToken = env.storage.getItem(REFRESH_KEY);
       env.storage.removeItem(REFRESH_KEY);
       tokens = null;

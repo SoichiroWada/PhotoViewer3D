@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { INCOMING_PREFIX, MAX_UPLOAD_BYTES, SUPPORTED_TYPES } from "../../lib/catalog-config";
+import { isDemoCaller } from "../../lib/demo-config";
 
 export type PresignedPost = { url: string; fields: Record<string, string> };
 export type PostPresigner = (input: {
@@ -22,6 +23,7 @@ export function safeFilename(value: unknown): string | undefined {
 
 export function createUploadHandler(presign: PostPresigner, logger: Pick<Console, "error"> = console) {
   return async (event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyStructuredResultV2> => {
+    if (isDemoCaller(event.requestContext.authorizer?.jwt?.claims)) return json(403, { error: "Uploading is not available in demo mode." });
     let body: Record<string, unknown>;
     try {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "";

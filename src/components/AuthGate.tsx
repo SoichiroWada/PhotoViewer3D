@@ -3,11 +3,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createCognitoAuth, loadAuthConfig, type CognitoAuth } from "@/lib/auth/cognitoAuth";
 import { startMediaSession } from "@/lib/api/awsApi";
+import { apiUrl } from "@/lib/api/photoApi";
 
 /** `local`: no auth-config.json, so the local backend is used without sign-in. */
 export type AuthContextValue =
   | { mode: "local" }
-  | { mode: "cognito"; email: string | null; getAccessToken: () => Promise<string | null>; signOut: () => void };
+  | { mode: "cognito"; email: string | null; demo: boolean; getAccessToken: () => Promise<string | null>; signOut: () => void };
 
 const AuthContext = createContext<AuthContextValue>({ mode: "local" });
 export const useAuth = () => useContext(AuthContext);
@@ -30,7 +31,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       const client = auth.current ??= createCognitoAuth(config, {
         fetch: window.fetch.bind(window), storage: localStorage, session: sessionStorage,
         location: window.location, history: window.history,
-      });
+      }, apiUrl("demo-login"));
       await client.handleRedirect();
       const token = await client.getAccessToken();
       if (!token) { if (!cancelled) setState("signedOut"); return; }
@@ -53,9 +54,18 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [state]);
 
+  const startDemo = () => {
+    const client = auth.current;
+    if (!client) return;
+    setState("checking");
+    client.signInDemo().then(() => setAttempt(value => value + 1)).catch(reason => {
+      setError(reason instanceof Error ? reason.message : "Unable to start the demo.");
+      setState("error");
+    });
+  };
   const signOut = useCallback(() => { void auth.current?.signOut(); }, []);
   const value = useMemo<AuthContextValue>(() => state === "ready" && auth.current
-    ? { mode: "cognito", email: auth.current.email(), getAccessToken: () => auth.current!.getAccessToken(), signOut }
+    ? { mode: "cognito", email: auth.current.email(), demo: auth.current.isDemo(), getAccessToken: () => auth.current!.getAccessToken(), signOut }
     : { mode: "local" }, [state, signOut]);
 
   if (state === "local" || state === "ready") return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -68,7 +78,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <p className="eyebrow">A walk through time</p>
           <h2>3D Photo Viewer</h2>
           <p>Sign in with your invited account to see the collection.</p>
-          <button className="button button--primary" onClick={() => void auth.current?.signIn()}>Sign in</button>
+          <div className="gate-actions">
+            <button className="button button--primary" onClick={() => void auth.current?.signIn()}>Sign in</button>
+            <button className="button" onClick={startDemo}>DEMO</button>
+          </div>
+          <p>DEMO opens the collection without an account; uploading and deleting are turned off.</p>
         </>}
         {state === "error" && <>
           <h2>Couldn’t sign you in</h2><p>{error}</p>

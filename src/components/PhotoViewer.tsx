@@ -19,11 +19,13 @@ import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import PhotoModal from "./PhotoModal";
 import UploadButton from "./UploadButton";
 import { useAuth } from "./AuthGate";
+import FullscreenButton from "./FullscreenButton";
 
 type LoadState = "loading" | "ready" | "error";
 type ViewMode = "corridor" | "grid";
 const VIEW_MODE_KEY = "photoviewer3d.viewMode";
 const SORT_ORDER_KEY = "photoviewer3d.sortOrder";
+const DEMO_UNAVAILABLE = "Not available in demo mode";
 
 // Remembered per browser; storage can be unavailable (private windows, previews).
 function readSetting(key: string): string | null {
@@ -65,6 +67,8 @@ export default function PhotoViewer() {
   const gridPhotos = useMemo(() => corridor ? [] : sortPhotos(photos, sortOrder), [corridor, photos, sortOrder]);
   // Deleting is an AWS-only feature; the local backend serves the original backup directory.
   const canDelete = auth.mode === "cognito";
+  // The demo shows the same controls, greyed out; the API refuses demo uploads and deletes regardless.
+  const demo = auth.mode === "cognito" && auth.demo;
   const checkedPhotos = useMemo(() => gridPhotos.filter(item => checkedIds.has(item.id)), [gridPhotos, checkedIds]);
   const clearSelection = useCallback(() => { setCheckedIds(new Set()); selectionAnchor.current = null; }, []);
   const selectPhoto = useCallback((item: Photo, mode: SelectMode) => {
@@ -127,11 +131,11 @@ export default function PhotoViewer() {
       const element = event.target as HTMLElement;
       if (element.matches("input:not([type=checkbox]), textarea, select") || element.isContentEditable) return;
       if (event.key === "Escape" && checkedIds.size) clearSelection();
-      if (event.key === "Delete" && checkedIds.size && canDelete) { event.preventDefault(); setDeleting({ busy: false }); }
+      if (event.key === "Delete" && checkedIds.size && canDelete && !demo) { event.preventDefault(); setDeleting({ busy: false }); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [corridor, selected, deleting, checkedIds, canDelete, clearSelection]);
+  }, [corridor, selected, deleting, checkedIds, canDelete, demo, clearSelection]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -196,6 +200,7 @@ export default function PhotoViewer() {
           <div><p className="eyebrow">A walk through time</p><h1>3D Photo Viewer</h1></div>
         </div>
         <div className="header-actions">
+          <FullscreenButton />
           <span className="photo-count">{loadState === "ready" ? `${photos.length} photos` : "Your photo collection"}</span>
           <div className="view-switch" role="group" aria-label="View">
             <button className="view-switch__option" aria-pressed={corridor} onClick={() => changeViewMode("corridor")}>3D</button>
@@ -203,8 +208,9 @@ export default function PhotoViewer() {
           </div>
           {corridor && <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>}
           {auth.mode === "cognito" && <>
-            <UploadButton getAccessToken={auth.getAccessToken} onUploaded={() => setReload(value => value + 1)} />
-            <button className="button" onClick={auth.signOut} title={auth.email ?? undefined}>Sign out</button>
+            <UploadButton getAccessToken={auth.getAccessToken} onUploaded={() => setReload(value => value + 1)}
+              unavailable={demo ? DEMO_UNAVAILABLE : undefined} />
+            <button className="button" onClick={auth.signOut} title={demo ? undefined : auth.email ?? undefined}>{demo ? "Exit demo" : "Sign out"}</button>
           </>}
         </div>
       </header>
@@ -223,7 +229,7 @@ export default function PhotoViewer() {
             <span className="grid-toolbar__count" aria-live="polite">{checkedIds.size ? `${checkedIds.size} selected` : "Ctrl/Shift-click or tick photos to select"}</span>
             {checkedIds.size < gridPhotos.length && <button className="button" onClick={() => setCheckedIds(new Set(gridPhotos.map(item => item.id)))}>Select all</button>}
             {checkedIds.size > 0 && <button className="button" onClick={clearSelection}>Clear</button>}
-            <button className="button button--danger" disabled={!checkedIds.size} onClick={() => setDeleting({ busy: false })}>Delete{checkedIds.size ? ` (${checkedIds.size})` : ""}</button>
+            <button className="button button--danger" disabled={!checkedIds.size || demo} title={demo ? DEMO_UNAVAILABLE : undefined} onClick={() => setDeleting({ busy: false })}>Delete{checkedIds.size ? ` (${checkedIds.size})` : ""}</button>
           </div>}
         </div>
         {loadState === "ready" && <PhotoGrid photos={gridPhotos} onOpen={setSelected}
