@@ -119,10 +119,15 @@ export default function PhotoViewer() {
 
   useEffect(() => {
     // Read after hydration so the static HTML always matches the first render.
-    if (readSetting(VIEW_MODE_KEY) === "grid") setViewMode("grid");
+    // The demo always opens in 3D, and its choice is not remembered for the browser's real user.
+    if (!demo && readSetting(VIEW_MODE_KEY) === "grid") setViewMode("grid");
     setSortOrder(parseSortOrder(readSetting(SORT_ORDER_KEY)));
-  }, []);
-  const changeViewMode = (mode: ViewMode) => { setViewMode(mode); writeSetting(VIEW_MODE_KEY, mode); clearSelection(); };
+  }, [demo]);
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (!demo) writeSetting(VIEW_MODE_KEY, mode);
+    clearSelection();
+  };
   useEffect(clearSelection, [reload, clearSelection]);
 
   useEffect(() => {

@@ -22,8 +22,11 @@ test("DEMO signs in from the gate and shows the collection with upload and delet
     if (path === "/photos") return route.fulfill({ json: photos, headers: cors });
     return route.fulfill({ status: 403, headers: cors, json: { error: "unexpected" } });
   });
+  // A grid choice remembered from a regular sign-in must not carry over into the demo.
+  await page.addInitScript(() => localStorage.setItem("photoviewer3d.viewMode", "grid"));
   await page.goto("/");
   await page.getByRole("button", { name: "DEMO" }).click();
+  await expect(page.getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".photo-card").first()).toBeVisible();
   expect(demoLogins).toBe(1);
   await expect(page.getByRole("button", { name: /^Upload/ })).toBeDisabled();
@@ -37,9 +40,11 @@ test("DEMO signs in from the gate and shows the collection with upload and delet
   await page.keyboard.press("Delete");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  // A reload stays in the demo by asking for demo tokens again.
+  // A reload stays in the demo by asking for demo tokens again, and starts in 3D even after choosing Grid.
   await page.reload();
-  await expect(page.locator(".photo-tile").first()).toBeVisible();
+  await expect(page.locator(".photo-card").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => localStorage.getItem("photoviewer3d.viewMode"))).toBe("grid");
   expect(demoLogins).toBe(2);
   await page.getByRole("button", { name: "Exit demo" }).click();
   await expect(page.getByRole("button", { name: "DEMO" })).toBeVisible();
