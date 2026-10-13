@@ -283,14 +283,15 @@ export class PhotoViewerStack extends Stack {
 
     // ------------------------------------------------------------ routes
     // The only unauthenticated route; it is throttled well below Cognito's account quotas.
-    api.addRoutes({
+    const [demoRoute] = api.addRoutes({
       path: "/api/demo-login", methods: [HttpMethod.POST],
       integration: new HttpLambdaIntegration("DemoLoginIntegration", demoLogin),
     });
     // `routeSettings` is untyped JSON, so it takes CloudFormation's own key casing.
-    (api.defaultStage!.node.defaultChild as CfnStage).routeSettings = {
-      "POST /api/demo-login": { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 },
-    };
+    const stage = api.defaultStage!.node.defaultChild as CfnStage;
+    stage.routeSettings = { "POST /api/demo-login": { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 } };
+    // Route settings can only name a route that already exists.
+    stage.node.addDependency(demoRoute!);
     for (const [routePath, method, fn] of [
       ["/api/photos", HttpMethod.GET, listPhotos],
       ["/api/session", HttpMethod.POST, session],

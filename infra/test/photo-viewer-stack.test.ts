@@ -52,6 +52,9 @@ test("every API route except the throttled demo sign-in requires the Cognito JWT
   template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
     RouteSettings: { "POST /api/demo-login": { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 } },
   });
+  const [[demoId]] = routes.filter(([, route]) => route.Properties.RouteKey === "POST /api/demo-login") as [[string, any]];
+  const [[, stage]] = ofType("AWS::ApiGatewayV2::Stage") as [[string, any]];
+  assert.ok(stage.DependsOn?.includes(demoId), "the stage must be updated after the demo route exists");
   template.hasResourceProperties("AWS::Lambda::Function", {
     ReservedConcurrentExecutions: 1, Environment: { Variables: Match.objectLike({ DEMO_CLIENT_ID: Match.anyValue() }) },
   });
@@ -75,8 +78,8 @@ test("the demo group exists and its client signs in only server-side, without at
     AllowedOAuthFlowsUserPoolClient: false,
     WriteAttributes: [],
   });
-  const [[, authorizer]] = ofType("AWS::ApiGatewayV2::Authorizer");
-  const audience = JSON.stringify(authorizer!.Properties.JwtConfiguration.Audience);
+  const [[, authorizer]] = ofType("AWS::ApiGatewayV2::Authorizer") as [[string, any]];
+  const audience = JSON.stringify(authorizer.Properties.JwtConfiguration.Audience);
   assert.ok(audience.includes("UserPoolWebClient") && audience.includes("UserPoolDemoClient"));
 });
 
