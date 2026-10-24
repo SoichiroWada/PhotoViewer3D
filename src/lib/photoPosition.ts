@@ -11,7 +11,7 @@ export const UPCOMING = 25;
 export const PASSED = 5;
 export type Position = { x: number; y: number }; // normalized viewport coordinates
 
-function seededRandom(id: string) {
+export function seededRandom(id: string) {
   let state = 2166136261;
   for (const char of id) state = Math.imul(state ^ char.charCodeAt(0), 16777619);
   return () => {
