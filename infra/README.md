@@ -97,6 +97,23 @@ untouched. The deployment writes `auth-config.json` (region, pool, client and
 Hosted UI domain; none of them secret) next to the static files and invalidates
 CloudFront.
 
+### GitHub Actions
+
+Merges to `master` deploy automatically (`.github/workflows/deploy.yml`); pull
+requests into `master` run the tests, the build and a template-only `cdk diff`
+(`.github/workflows/pr-check.yml`). Actions authenticate with GitHub OIDC, so
+no AWS keys are stored. `PhotoViewer3DGitHubDeploy` holds the OIDC provider
+and two roles: `DeployRole` (only `refs/heads/master`, may only assume the CDK
+bootstrap roles) and `DiffRole` (pull requests, may only read the app stack's
+template). Deploy it by hand once, and again only when its trust changes:
+
+```bash
+npx cdk deploy PhotoViewer3DGitHubDeploy --profile <profile>
+```
+
+Then store its `DeployRoleArn` and `DiffRoleArn` outputs as the repository
+secrets `AWS_DEPLOY_ROLE_ARN` and `AWS_DIFF_ROLE_ARN`.
+
 ### Outputs
 
 | Output | Purpose |

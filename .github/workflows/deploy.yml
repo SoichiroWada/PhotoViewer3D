@@ -1,0 +1,44 @@
+# Every push to master (a merged pull request) is tested again and deployed to AWS.
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer merge waits instead of cancelling a deploy halfway.
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the deploy role
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix infra
+
+      - run: npm test
+      - run: npm test --prefix infra
+      - run: npm run build:aws
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - name: cdk deploy
+        run: npm --prefix infra run deploy -- --require-approval never

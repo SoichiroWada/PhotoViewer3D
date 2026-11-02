@@ -1,5 +1,6 @@
 import path from "node:path";
 import { App } from "aws-cdk-lib";
+import { GitHubDeployStack } from "../lib/github-deploy-stack";
 import { PhotoViewerStack } from "../lib/photo-viewer-stack";
 
 const app = new App();
@@ -13,4 +14,14 @@ new PhotoViewerStack(app, "PhotoViewer3D", {
   },
   siteDirectory: siteDir ? path.resolve(siteDir) : undefined,
   photoTimeZone: app.node.tryGetContext("photoTimeZone"),
+});
+// Deployed by hand once (`cdk deploy PhotoViewer3DGitHubDeploy`); the workflows only deploy PhotoViewer3D.
+new GitHubDeployStack(app, "PhotoViewer3DGitHubDeploy", {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: app.node.tryGetContext("region") ?? "ap-northeast-1",
+  },
+  repository: "SoichiroWada/PhotoViewer3D",
+  deployBranch: "master",
+  appStackName: "PhotoViewer3D",
 });
