@@ -21,7 +21,8 @@ new GitHubDeployStack(app, "PhotoViewer3DGitHubDeploy", {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: app.node.tryGetContext("region") ?? "ap-northeast-1",
   },
-  repository: "SoichiroWada/PhotoViewer3D",
+  // GitHub's OIDC `sub` names the owner and repository with their immutable IDs.
+  repository: "SoichiroWada@30546474/PhotoViewer3D@1407135025",
   deployBranch: "master",
   appStackName: "PhotoViewer3D",
 });

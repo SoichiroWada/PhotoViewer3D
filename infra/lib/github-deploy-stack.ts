@@ -3,7 +3,7 @@ import { Construct } from "constructs";
 import * as iam from "aws-cdk-lib/aws-iam";
 
 export interface GitHubDeployStackProps extends StackProps {
-  /** `owner/name` of the repository whose workflows may use these roles. */
+  /** Repository as GitHub's OIDC `sub` names it (`owner@id/name@id`); its workflows may use these roles. */
   repository: string;
   /** The only branch allowed to deploy. */
   deployBranch: string;
@@ -33,7 +33,7 @@ export class GitHubDeployStack extends Stack {
 
     // Merges to the deploy branch: may only hand off to the CDK bootstrap roles.
     const deployRole = new iam.Role(this, "DeployRole", {
-      description: `GitHub Actions deploys from ${props.repository}@${props.deployBranch}`,
+      description: `GitHub Actions deploys from ${props.repository}, branch ${props.deployBranch}`,
       assumedBy: assumedBy(`repo:${props.repository}:ref:refs/heads/${props.deployBranch}`),
     });
     deployRole.addToPolicy(new iam.PolicyStatement({
