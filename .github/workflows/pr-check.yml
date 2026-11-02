@@ -1,0 +1,49 @@
+# Pull requests into master: tests, typecheck, build, and a preview of the AWS changes. Never deploys.
+name: PR check
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the read-only diff role
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix infra
+
+      - run: npm run typecheck
+      - run: npm test
+      - working-directory: infra
+        run: npx tsc -p tsconfig.json --noEmit
+      - run: npm test --prefix infra
+      - run: npm run build:aws
+
+      # Fork pull requests get no OIDC token, so they skip the diff.
+      - if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DIFF_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - if: github.event.pull_request.head.repo.full_name == github.repository
+        name: cdk diff
+        working-directory: infra
+        run: npx cdk diff PhotoViewer3D -c siteDir=../out --method template
