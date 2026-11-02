@@ -1,8 +1,5 @@
 import { loadPhotos, PhotoDirectoryError } from "@/lib/photoLoader";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   try {
     return Response.json(await loadPhotos(), { headers: { "Cache-Control": "no-store" } });

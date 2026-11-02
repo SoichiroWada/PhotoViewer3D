@@ -2,19 +2,41 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Photo } from "@/types/photo";
+import { getPhotos } from "@/lib/api/photoApi";
+import { deletePhotos } from "@/lib/api/awsApi";
+import { selectionRange } from "@/lib/photoSelection";
 import {
   cameraLimit, cameraStep, clampCamera, createPhotoPositions, DEPTH_SPACING,
   visibleWindow, wheelDistance,
 } from "@/lib/photoPosition";
+import { parseSortOrder, SORT_OPTIONS, sortOrderValue, sortPhotos } from "@/lib/photoSort";
 import { createYearMarkers, nearbyYearMarkers } from "@/lib/yearMarkers";
 import Corridor from "./Corridor";
 import CorridorYears from "./CorridorYears";
 import PhotoCard from "./PhotoCard";
+import PhotoGrid, { type SelectMode } from "./PhotoGrid";
+import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import PhotoModal from "./PhotoModal";
+import UploadButton from "./UploadButton";
+import { useAuth } from "./AuthGate";
+import FullscreenButton from "./FullscreenButton";
 
 type LoadState = "loading" | "ready" | "error";
+type ViewMode = "corridor" | "grid";
+const VIEW_MODE_KEY = "photoviewer3d.viewMode";
+const SORT_ORDER_KEY = "photoviewer3d.sortOrder";
+const DEMO_UNAVAILABLE = "Not available in demo mode";
+
+// Remembered per browser; storage can be unavailable (private windows, previews).
+function readSetting(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writeSetting(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
+}
 
 export default function PhotoViewer() {
+  const auth = useAuth();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
@@ -22,6 +44,11 @@ export default function PhotoViewer() {
   const [cameraZ, setCameraZ] = useState(0);
   const [selected, setSelected] = useState<Photo | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("corridor");
+  const [sortOrder, setSortOrder] = useState(() => parseSortOrder(null));
+  const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set());
+  const [deleting, setDeleting] = useState<{ busy: boolean; error?: string } | null>(null);
+  const selectionAnchor = useRef<string | null>(null);
   const target = useRef(0);
   const current = useRef(0);
   const stage = useRef<HTMLDivElement>(null);
@@ -35,6 +62,39 @@ export default function PhotoViewer() {
   const photo = photos[nearest];
   const limit = cameraLimit(photos.length);
   const atEnd = photos.length > 0 && cameraZ >= limit - 1;
+  const corridor = viewMode === "corridor";
+  // The corridor always walks back in time; only the grid follows the chosen order.
+  const gridPhotos = useMemo(() => corridor ? [] : sortPhotos(photos, sortOrder), [corridor, photos, sortOrder]);
+  // Deleting is an AWS-only feature; the local backend serves the original backup directory.
+  const canDelete = auth.mode === "cognito";
+  // The demo shows the same controls, greyed out; the API refuses demo uploads and deletes regardless.
+  const demo = auth.mode === "cognito" && auth.demo;
+  const checkedPhotos = useMemo(() => gridPhotos.filter(item => checkedIds.has(item.id)), [gridPhotos, checkedIds]);
+  const clearSelection = useCallback(() => { setCheckedIds(new Set()); selectionAnchor.current = null; }, []);
+  const selectPhoto = useCallback((item: Photo, mode: SelectMode) => {
+    const anchor = selectionAnchor.current;
+    setCheckedIds(current => {
+      const next = new Set(current);
+      if (mode === "range" && anchor) {
+        for (const id of selectionRange(gridPhotos.map(entry => entry.id), anchor, item.id)) next.add(id);
+      } else if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    selectionAnchor.current = item.id;
+  }, [gridPhotos]);
+  const confirmDelete = async () => {
+    if (auth.mode !== "cognito") return;
+    setDeleting({ busy: true });
+    const result = await deletePhotos(checkedPhotos.map(item => item.id), auth.getAccessToken);
+    const deleted = new Set(result.deleted);
+    setPhotos(current => current.filter(item => !deleted.has(item.id)));
+    setCheckedIds(current => new Set([...current].filter(id => !deleted.has(id))));
+    // Failed photos stay selected so the dialog can retry them.
+    setDeleting(result.failed.length
+      ? { busy: false, error: `${result.failed.length} photo(s) could not be deleted: ${result.failed[0]!.error}` }
+      : null);
+  };
   const move = useCallback((distance: number) => {
     target.current = clampCamera(target.current + distance, photos.length);
   }, [photos.length]);
@@ -42,12 +102,7 @@ export default function PhotoViewer() {
   useEffect(() => {
     const controller = new AbortController();
     setLoadState("loading");
-    fetch("/api/photos", { signal: controller.signal, cache: "no-store" })
-      .then(async response => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Unable to load photos.");
-        return data as Photo[];
-      })
+    getPhotos({ signal: controller.signal, getAccessToken: auth.mode === "cognito" ? auth.getAccessToken : undefined })
       .then(data => {
         setPhotos(data);
         target.current = current.current = 0;
@@ -60,7 +115,32 @@ export default function PhotoViewer() {
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [reload]);
+  }, [reload, auth]);
+
+  useEffect(() => {
+    // Read after hydration so the static HTML always matches the first render.
+    // The demo always opens in 3D, and its choice is not remembered for the browser's real user.
+    if (!demo && readSetting(VIEW_MODE_KEY) === "grid") setViewMode("grid");
+    setSortOrder(parseSortOrder(readSetting(SORT_ORDER_KEY)));
+  }, [demo]);
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (!demo) writeSetting(VIEW_MODE_KEY, mode);
+    clearSelection();
+  };
+  useEffect(clearSelection, [reload, clearSelection]);
+
+  useEffect(() => {
+    if (corridor || selected || deleting) return;
+    const onKey = (event: KeyboardEvent) => {
+      const element = event.target as HTMLElement;
+      if (element.matches("input:not([type=checkbox]), textarea, select") || element.isContentEditable) return;
+      if (event.key === "Escape" && checkedIds.size) clearSelection();
+      if (event.key === "Delete" && checkedIds.size && canDelete && !demo) { event.preventDefault(); setDeleting({ busy: false }); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [corridor, selected, deleting, checkedIds, canDelete, demo, clearSelection]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -94,11 +174,11 @@ export default function PhotoViewer() {
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [move, photos.length, selected]);
+  }, [move, photos.length, selected, corridor]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (selected || !photos.length || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!corridor || selected || !photos.length || event.altKey || event.ctrlKey || event.metaKey) return;
       const element = event.target as HTMLElement;
       if (element.matches("input, textarea, select") || element.isContentEditable) return;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -108,7 +188,7 @@ export default function PhotoViewer() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, photos.length, selected]);
+  }, [move, photos.length, selected, corridor]);
 
   const openPhoto = useCallback((next: Photo) => {
     // Freeze the camera while browsing an original.
@@ -125,11 +205,46 @@ export default function PhotoViewer() {
           <div><p className="eyebrow">A walk through time</p><h1>3D Photo Viewer</h1></div>
         </div>
         <div className="header-actions">
+          <FullscreenButton />
           <span className="photo-count">{loadState === "ready" ? `${photos.length} photos` : "Your photo collection"}</span>
-          <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>
+          <div className="view-switch" role="group" aria-label="View">
+            <button className="view-switch__option" aria-pressed={corridor} onClick={() => changeViewMode("corridor")}>3D</button>
+            <button className="view-switch__option" aria-pressed={!corridor} onClick={() => changeViewMode("grid")}>Grid</button>
+          </div>
+          {corridor && <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>}
+          {auth.mode === "cognito" && <>
+            <UploadButton getAccessToken={auth.getAccessToken} onUploaded={() => setReload(value => value + 1)}
+              unavailable={demo ? DEMO_UNAVAILABLE : undefined} />
+            <button className="button" onClick={auth.signOut} title={demo ? undefined : auth.email ?? undefined}>{demo ? "Exit demo" : "Sign out"}</button>
+          </>}
         </div>
       </header>
 
+      {!corridor && <section className="grid-view" aria-label="Photo list view">
+        <div className="grid-toolbar">
+          <label className="grid-toolbar__sort">Sort by
+            <select value={sortOrderValue(sortOrder)} onChange={event => {
+              setSortOrder(parseSortOrder(event.target.value));
+              writeSetting(SORT_ORDER_KEY, event.target.value);
+            }}>
+              {SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {canDelete && loadState === "ready" && photos.length > 0 && <div className="grid-toolbar__selection">
+            <span className="grid-toolbar__count" aria-live="polite">{checkedIds.size ? `${checkedIds.size} selected` : "Ctrl/Shift-click or tick photos to select"}</span>
+            {checkedIds.size < gridPhotos.length && <button className="button" onClick={() => setCheckedIds(new Set(gridPhotos.map(item => item.id)))}>Select all</button>}
+            {checkedIds.size > 0 && <button className="button" onClick={clearSelection}>Clear</button>}
+            <button className="button button--danger" disabled={!checkedIds.size || demo} title={demo ? DEMO_UNAVAILABLE : undefined} onClick={() => setDeleting({ busy: false })}>Delete{checkedIds.size ? ` (${checkedIds.size})` : ""}</button>
+          </div>}
+        </div>
+        {loadState === "ready" && <PhotoGrid photos={gridPhotos} onOpen={setSelected}
+          selection={canDelete ? { ids: checkedIds, onSelect: selectPhoto } : undefined} />}
+        {loadState === "loading" && <div className="grid-message" role="status"><span className="loader" /><h2>Opening your collection</h2></div>}
+        {loadState === "error" && <div className="grid-message" role="alert"><h2>Couldn’t open the collection</h2><p>{error}</p><button className="button button--primary" onClick={() => setReload(value => value + 1)}>Try again</button></div>}
+        {loadState === "ready" && !photos.length && <div className="grid-message"><h2>No photos yet</h2><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
+      </section>}
+
+      {corridor && <>
       <div ref={stage} className="viewer-stage" tabIndex={0} aria-label="Photo corridor. Scroll or use up and down arrow keys to travel through time."
         data-camera-z={cameraZ.toFixed(2)}
         onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}
@@ -160,7 +275,7 @@ export default function PhotoViewer() {
         <span className="stage-label"><span className="status-dot" /> {atEnd ? "End of the collection" : "Memories in perspective"}</span>
         {loadState === "loading" && <div className="viewer-message" role="status"><span className="loader" /><h2>Opening your collection</h2><p>Bringing your memories into view.</p></div>}
         {loadState === "error" && <div className="viewer-message" role="alert"><h2>Couldn’t open the collection</h2><p>{error}</p><button className="button button--primary" onClick={() => setReload(value => value + 1)}>Try again</button></div>}
-        {loadState === "ready" && !photos.length && <div className="viewer-message"><h2>Your corridor is waiting</h2><p>Add JPG, PNG, or WebP images to the configured photo directory.</p><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
+        {loadState === "ready" && !photos.length && <div className="viewer-message"><h2>Your corridor is waiting</h2><p>{auth.mode === "cognito" ? "Use Upload to add JPG, PNG, or WebP photos." : "Add JPG, PNG, or WebP images to the configured photo directory."}</p><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
         {atEnd && <div className="viewer-message viewer-message--end"><p className="eyebrow">The beginning of your story</p><h2>You’ve reached the oldest memory.</h2><button className="button button--primary" onClick={returnToPresent}>Return to present</button></div>}
       </div>
 
@@ -184,6 +299,10 @@ export default function PhotoViewer() {
         </div>
         <p className="navigation-hint"><span aria-hidden="true">↕</span> Scroll to travel <span className="hint-divider">·</span> <kbd>↑</kbd> <kbd>↓</kbd> to step <span className="hint-divider">·</span> Click a photo to explore</p>
       </footer>
+      </>}
+      {deleting && checkedPhotos.length > 0 && <DeleteConfirmDialog filenames={checkedPhotos.map(item => item.filename)}
+        busy={deleting.busy} error={deleting.error} onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleting(null)} />}
       {selected && <PhotoModal key={selected.id} photo={selected} onClose={() => setSelected(null)} />}
     </main>
   );

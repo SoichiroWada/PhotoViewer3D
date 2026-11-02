@@ -1,0 +1,7 @@
+{
+  "app": "node --import tsx bin/photo-viewer.ts",
+  "versionReporting": false,
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true
+  }
+}

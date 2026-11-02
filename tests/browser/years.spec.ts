@@ -1,7 +1,8 @@
+import { getBrowserPhotos } from "./photoApi";
 import { expect, test } from "@playwright/test";
 
 test("actual year markers sit on the right wall and approach at their photo depth", async ({ page, request }) => {
-  const photos = await (await request.get("/api/photos")).json();
+  const photos = await getBrowserPhotos(request);
   const expected: { year: number; index: number }[] = [];
   let previous: number | undefined;
   photos.forEach((photo: { takenAt: string }, index: number) => {

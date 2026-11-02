@@ -24,3 +24,10 @@ test-results/
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Static frontend export
+out/
+
+# AWS CDK generated output
+infra/cdk.out/
+infra/dist/

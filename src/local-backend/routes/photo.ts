@@ -5,9 +5,6 @@ import { photoRevision } from "@/lib/photoRevision";
 import { openPhotoVariant } from "@/lib/photoVariantCache";
 import type { FileHandle } from "node:fs/promises";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const size = new URL(request.url).searchParams.get("size") ?? "original";
   if (!isPhotoSize(size)) return new Response("Invalid photo size", { status: 400 });
