@@ -27,9 +27,9 @@ test("watcher handles initial and chunked files, duplicates, and isolated failur
   const watcher = await startPhotoImportWatcher(config, message => logs.push(message));
   try {
     await watcher.ready;
-    await until(async () => (await readdir(destination)).includes("existing.JPG"));
+    // The file is published before the import finishes its cleanup and logs, so wait for the log too.
+    await until(async () => (await readdir(destination)).includes("existing.JPG") && logs.some(log => log.startsWith("Imported:")));
     assert.deepEqual(await readFile(path.join(destination, "existing.JPG")), initial);
-    assert.ok(logs.some(log => log.startsWith("Imported:")));
     const large = Buffer.concat([initial, Buffer.alloc(1024 * 1024, 31)]);
     const source = path.join(incoming, "chunked.JPG");
     await writeFile(source, large.subarray(0, 500000));
