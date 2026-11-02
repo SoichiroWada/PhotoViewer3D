@@ -69,7 +69,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .loader { display: block; margin: 0 auto 18px; width: 24px; height: 24px; border: 2px solid #d3ddcc; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .timeline-panel { padding: 21px 42px 18px; background: var(--paper); border-top: 1px solid var(--line); position: relative; z-index: 2; }
-.timeline-panel__top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 17px; }
+/* The current-moment block sits centred, with the step buttons kept at the right. */
+.timeline-panel__top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: 17px; }
+.current-memory { grid-column: 2; }
+.navigation-controls { grid-column: 3; justify-self: end; }
 .current-memory__date { font-size: 18px; font-weight: 400; letter-spacing: -.3px; }
 .current-memory__index { margin-left: 15px; font-size: 10px; color: var(--muted); }
 .navigation-controls { display: flex; gap: 7px; }
@@ -168,3 +171,18 @@ kbd { padding: 0 4px; border: 1px solid #d7dfcf; border-radius: 3px; font: inher
   .loader { animation: none; }
   .photo-modal::backdrop { backdrop-filter: none; }
 }
+/* Wall view: a belt wrapped round the front of a drum, running away on both sides. */
+/* Poses are computed for element centres: rotate about the element origin, then centre it. */
+.wall-year, .photo-card.photo-card--wall { transform-origin: 0 0; }
+.wall-room { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(#dfe1da, #e9ebe3 46%, #d6dacd 54%, #e6e8de); }
+/* The belt is a projected 2D drawing behind the 3D photos (see PhotoWall). */
+.wall-belt { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wall-belt__seam { stroke: #0000000f; }
+.wall-belt__rail { fill: #c6ccbd; }
+.wall-world { position: absolute; inset: 0; transform-style: preserve-3d; pointer-events: none; }
+.wall-year { position: absolute; left: 50%; top: 50%; backface-visibility: hidden; pointer-events: none; font-size: 48px; letter-spacing: .06em; line-height: 1; color: #748070; white-space: nowrap; user-select: none; }
+/* 390 × ~300px in total: keep WALL_CARD in wallPosition.ts in step. */
+.photo-card.photo-card--wall { width: 390px; padding: 6px; }
+.photo-card--wall .photo-card__image { height: 264px; }
+.photo-card--wall::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; background: #000; opacity: var(--wall-dim, 0); pointer-events: none; }
+.photo-card--wall .photo-card__caption { padding: 7px 3px 3px; font-size: 9px; }

@@ -10,11 +10,13 @@ import {
   visibleWindow, wheelDistance,
 } from "@/lib/photoPosition";
 import { parseSortOrder, SORT_OPTIONS, sortOrderValue, sortPhotos } from "@/lib/photoSort";
+import { createWallPositions, wallWindow } from "@/lib/wallPosition";
 import { createYearMarkers, nearbyYearMarkers } from "@/lib/yearMarkers";
 import Corridor from "./Corridor";
 import CorridorYears from "./CorridorYears";
 import PhotoCard from "./PhotoCard";
 import PhotoGrid, { type SelectMode } from "./PhotoGrid";
+import PhotoWall from "./PhotoWall";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import PhotoModal from "./PhotoModal";
 import UploadButton from "./UploadButton";
@@ -22,7 +24,7 @@ import { useAuth } from "./AuthGate";
 import FullscreenButton from "./FullscreenButton";
 
 type LoadState = "loading" | "ready" | "error";
-type ViewMode = "corridor" | "grid";
+type ViewMode = "corridor" | "wall" | "grid";
 const VIEW_MODE_KEY = "photoviewer3d.viewMode";
 const SORT_ORDER_KEY = "photoviewer3d.sortOrder";
 const DEMO_UNAVAILABLE = "Not available in demo mode";
@@ -52,19 +54,23 @@ export default function PhotoViewer() {
   const target = useRef(0);
   const current = useRef(0);
   const stage = useRef<HTMLDivElement>(null);
-  const pointer = useRef<{ id: number; y: number; moved: boolean } | null>(null);
+  const pointer = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
-  const positions = useMemo(() => createPhotoPositions(photos), [photos]);
+  const corridor = viewMode === "corridor";
+  const wall = viewMode === "wall";
+  // 3D and Wall share one timeline position, so switching between them keeps your place.
+  const immersive = corridor || wall;
+  const positions = useMemo(() => corridor ? createPhotoPositions(photos) : new Map(), [corridor, photos]);
+  const wallPositions = useMemo(() => wall ? createWallPositions(photos) : new Map(), [wall, photos]);
   const yearMarkers = useMemo(() => createYearMarkers(photos), [photos]);
-  const { start, end } = visibleWindow(photos.length, cameraZ);
+  const { start, end } = (wall ? wallWindow : visibleWindow)(photos.length, cameraZ);
   const visibleYears = useMemo(() => nearbyYearMarkers(yearMarkers, start, end), [yearMarkers, start, end]);
   const nearest = photos.length ? Math.min(photos.length - 1, Math.max(0, Math.floor(cameraZ / DEPTH_SPACING))) : 0;
   const photo = photos[nearest];
   const limit = cameraLimit(photos.length);
   const atEnd = photos.length > 0 && cameraZ >= limit - 1;
-  const corridor = viewMode === "corridor";
-  // The corridor always walks back in time; only the grid follows the chosen order.
-  const gridPhotos = useMemo(() => corridor ? [] : sortPhotos(photos, sortOrder), [corridor, photos, sortOrder]);
+  // The corridor and wall always travel back in time; only the grid follows the chosen order.
+  const gridPhotos = useMemo(() => immersive ? [] : sortPhotos(photos, sortOrder), [immersive, photos, sortOrder]);
   // Deleting is an AWS-only feature; the local backend serves the original backup directory.
   const canDelete = auth.mode === "cognito";
   // The demo shows the same controls, greyed out; the API refuses demo uploads and deletes regardless.
@@ -120,7 +126,8 @@ export default function PhotoViewer() {
   useEffect(() => {
     // Read after hydration so the static HTML always matches the first render.
     // The demo always opens in 3D, and its choice is not remembered for the browser's real user.
-    if (!demo && readSetting(VIEW_MODE_KEY) === "grid") setViewMode("grid");
+    const saved = readSetting(VIEW_MODE_KEY);
+    if (!demo && (saved === "wall" || saved === "grid")) setViewMode(saved);
     setSortOrder(parseSortOrder(readSetting(SORT_ORDER_KEY)));
   }, [demo]);
   const changeViewMode = (mode: ViewMode) => {
@@ -131,7 +138,7 @@ export default function PhotoViewer() {
   useEffect(clearSelection, [reload, clearSelection]);
 
   useEffect(() => {
-    if (corridor || selected || deleting) return;
+    if (immersive || selected || deleting) return;
     const onKey = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement;
       if (element.matches("input:not([type=checkbox]), textarea, select") || element.isContentEditable) return;
@@ -140,7 +147,7 @@ export default function PhotoViewer() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [corridor, selected, deleting, checkedIds, canDelete, demo, clearSelection]);
+  }, [immersive, selected, deleting, checkedIds, canDelete, demo, clearSelection]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -174,21 +181,24 @@ export default function PhotoViewer() {
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [move, photos.length, selected, corridor]);
+  }, [move, photos.length, selected, immersive]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!corridor || selected || !photos.length || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!immersive || selected || !photos.length || event.altKey || event.ctrlKey || event.metaKey) return;
       const element = event.target as HTMLElement;
       if (element.matches("input, textarea, select") || element.isContentEditable) return;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      // On the wall the past lies to the right, so the side arrows step through time too.
+      const older = event.key === "ArrowDown" || (wall && event.key === "ArrowRight");
+      const newer = event.key === "ArrowUp" || (wall && event.key === "ArrowLeft");
+      if (older || newer) {
         event.preventDefault();
-        move(event.key === "ArrowDown" ? DEPTH_SPACING : -DEPTH_SPACING);
+        move(older ? DEPTH_SPACING : -DEPTH_SPACING);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, photos.length, selected, corridor]);
+  }, [move, photos.length, selected, immersive, wall]);
 
   const openPhoto = useCallback((next: Photo) => {
     // Freeze the camera while browsing an original.
@@ -209,9 +219,10 @@ export default function PhotoViewer() {
           <span className="photo-count">{loadState === "ready" ? `${photos.length} photos` : "Your photo collection"}</span>
           <div className="view-switch" role="group" aria-label="View">
             <button className="view-switch__option" aria-pressed={corridor} onClick={() => changeViewMode("corridor")}>3D</button>
-            <button className="view-switch__option" aria-pressed={!corridor} onClick={() => changeViewMode("grid")}>Grid</button>
+            <button className="view-switch__option" aria-pressed={wall} onClick={() => changeViewMode("wall")}>Wall</button>
+            <button className="view-switch__option" aria-pressed={viewMode === "grid"} onClick={() => changeViewMode("grid")}>Grid</button>
           </div>
-          {corridor && <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>}
+          {immersive && <button className="button" onClick={returnToPresent} disabled={!photos.length || cameraZ < 1}>Back to present <span aria-hidden="true">↶</span></button>}
           {auth.mode === "cognito" && <>
             <UploadButton getAccessToken={auth.getAccessToken} onUploaded={() => setReload(value => value + 1)}
               unavailable={demo ? DEMO_UNAVAILABLE : undefined} />
@@ -220,7 +231,7 @@ export default function PhotoViewer() {
         </div>
       </header>
 
-      {!corridor && <section className="grid-view" aria-label="Photo list view">
+      {!immersive && <section className="grid-view" aria-label="Photo list view">
         <div className="grid-toolbar">
           <label className="grid-toolbar__sort">Sort by
             <select value={sortOrderValue(sortOrder)} onChange={event => {
@@ -244,35 +255,43 @@ export default function PhotoViewer() {
         {loadState === "ready" && !photos.length && <div className="grid-message"><h2>No photos yet</h2><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
       </section>}
 
-      {corridor && <>
-      <div ref={stage} className="viewer-stage" tabIndex={0} aria-label="Photo corridor. Scroll or use up and down arrow keys to travel through time."
+      {immersive && <>
+      <div ref={stage} className="viewer-stage" tabIndex={0} aria-label={wall
+        ? "Photo wall. Scroll or use the arrow keys to turn the wall through time."
+        : "Photo corridor. Scroll or use up and down arrow keys to travel through time."}
         data-camera-z={cameraZ.toFixed(2)}
         onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}
         onPointerDown={event => {
           if (event.pointerType === "mouse" || selected) return;
           suppressClick.current = false;
-          pointer.current = { id: event.pointerId, y: event.clientY, moved: false };
+          pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
         }}
         onPointerMove={event => {
           const touch = pointer.current;
           if (!touch || touch.id !== event.pointerId) return;
-          const distance = touch.y - event.clientY;
+          // Swiping up walks down the corridor; swiping left pulls the wall along like the belt it is.
+          const distance = wall ? touch.x - event.clientX : touch.y - event.clientY;
           if (!touch.moved && Math.abs(distance) < 6) return;
           if (!touch.moved) stage.current?.setPointerCapture(event.pointerId);
           touch.moved = true;
+          touch.x = event.clientX;
           touch.y = event.clientY;
           move(distance * 3);
         }}
         onPointerUp={() => { suppressClick.current = pointer.current?.moved ?? false; pointer.current = null; }}
         onPointerCancel={() => { pointer.current = null; suppressClick.current = false; }}>
-        <Corridor />
-        <CorridorYears markers={visibleYears} cameraZ={cameraZ} />
-        <div className="scene" aria-label="Floating photos">
-          {photos.slice(start, end).map((item, offset) => <PhotoCard key={item.id}
-            photo={item} index={start + offset} cameraZ={cameraZ}
-            position={positions.get(item.id)!} onOpen={openPhoto} />)}
-        </div>
-        <span className="stage-label"><span className="status-dot" /> {atEnd ? "End of the collection" : "Memories in perspective"}</span>
+        {corridor && <>
+          <Corridor />
+          <CorridorYears markers={visibleYears} cameraZ={cameraZ} />
+          <div className="scene" aria-label="Floating photos">
+            {photos.slice(start, end).map((item, offset) => <PhotoCard key={item.id}
+              photo={item} index={start + offset} cameraZ={cameraZ}
+              position={positions.get(item.id)!} onOpen={openPhoto} />)}
+          </div>
+        </>}
+        {wall && <PhotoWall photos={photos} start={start} end={end} cameraZ={cameraZ}
+          positions={wallPositions} years={visibleYears} onOpen={openPhoto} />}
+        <span className="stage-label"><span className="status-dot" /> {atEnd ? "End of the collection" : wall ? "Memories around you" : "Memories in perspective"}</span>
         {loadState === "loading" && <div className="viewer-message" role="status"><span className="loader" /><h2>Opening your collection</h2><p>Bringing your memories into view.</p></div>}
         {loadState === "error" && <div className="viewer-message" role="alert"><h2>Couldn’t open the collection</h2><p>{error}</p><button className="button button--primary" onClick={() => setReload(value => value + 1)}>Try again</button></div>}
         {loadState === "ready" && !photos.length && <div className="viewer-message"><h2>Your corridor is waiting</h2><p>{auth.mode === "cognito" ? "Use Upload to add JPG, PNG, or WebP photos." : "Add JPG, PNG, or WebP images to the configured photo directory."}</p><button className="button" onClick={() => setReload(value => value + 1)}>Reload photos</button></div>}
@@ -297,7 +316,7 @@ export default function PhotoViewer() {
             style={{ "--progress": `${limit ? cameraZ / limit * 100 : 0}%` } as React.CSSProperties} />
           <span>Past</span>
         </div>
-        <p className="navigation-hint"><span aria-hidden="true">↕</span> Scroll to travel <span className="hint-divider">·</span> <kbd>↑</kbd> <kbd>↓</kbd> to step <span className="hint-divider">·</span> Click a photo to explore</p>
+        <p className="navigation-hint"><span aria-hidden="true">↕</span> Scroll to travel <span className="hint-divider">·</span> <kbd>↑</kbd> <kbd>↓</kbd>{wall && <> <kbd>←</kbd> <kbd>→</kbd></>} to step <span className="hint-divider">·</span> Click a photo to explore</p>
       </footer>
       </>}
       {deleting && checkedPhotos.length > 0 && <DeleteConfirmDialog filenames={checkedPhotos.map(item => item.filename)}

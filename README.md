@@ -13,6 +13,8 @@ and cached variants without changing the originals.
 ## Features
 
 - 3D corridor-style chronological photo browsing, newest to oldest.
+- Wall view: photos mounted on a curved belt that slides from the present (left)
+  toward the past (right), driven by the same wheel and keyboard input as 3D.
 - EXIF Date Taken ordering, with modification and creation time fallbacks.
 - Continuous mouse-wheel, keyboard, touch, and timeline navigation.
 - Deterministic floating photo placement that stays stable during navigation.
@@ -360,6 +362,36 @@ with the same camera and perspective. Nearby markers are selected with binary
 search; labels do not capture pointer events. Their fade range is −750 to −1050,
 and the camera can travel 1050 depth units beyond the oldest photo.
 
+### Wall view
+
+The Wall view mounts photos on one continuous belt. Seen from above it is a "U":
+the belt wraps the front of a wide elliptical drum facing the viewer, then runs
+straight away on both sides and ends with a vertical cut where it has shrunk to
+about 9% of its front height. Newer photos sit on the left; travelling back in
+time slides the belt to the left, so older photos arrive from the right. It
+shares the 3D camera position, so the wheel (pulling it toward you goes back in
+time), arrow keys, timeline slider, and **Back to present** behave the same, and
+switching between 3D and Wall keeps your place. ← / → also step through time, and
+touch users swipe sideways.
+
+```text
+u = (index + jitter) × 240 − cameraZ / 420 × 240 − 400   // belt position, left < 0
+drum semi-axes 1100 × 600, front at translateZ −350, belt height 1100, cards 390 × 300
+```
+
+The belt's front fills the stage from top to bottom. Each photo tries up to 24
+seeded spots over the whole belt height around its place in time and keeps the
+first one clear of its neighbours. The rare photo that still overlaps one is
+lifted 40px further off the belt, which on this curvature keeps one card
+entirely on top instead of the two cutting through each other.
+
+The belt is flat and its vertical edges stay vertical in perspective, so it is
+drawn as a projected 2D SVG outline behind the 3D photos rather than as large 3D
+panels, which keeps movement smooth. Only photos and year labels are 3D. Shading
+follows the angle to the viewer; on photos it is a dark overlay rather than a CSS
+filter for the same reason. Year labels run along the top of the belt. At most
+about 75 photo cards are mounted at once.
+
 The browser lightbox always uses the original image. Its viewing behavior is
 isolated in `PhotoModal` for possible future native-viewer integration.
 
@@ -478,6 +510,7 @@ with portable filesystem APIs; use the completed-file handoff described above.
 | Viewer and lightbox | `src/components/PhotoViewer.tsx`, `PhotoCard.tsx`, `PhotoModal.tsx` |
 | Corridor and year markers | `src/components/Corridor.tsx`, `CorridorYears.tsx`, `src/lib/yearMarkers.ts` |
 | Photo catalog and dates | `src/lib/photoLoader.ts`, `photoDate.ts`, `src/types/photo.ts` |
+| Wall view | `src/components/PhotoWall.tsx`, `src/lib/wallPosition.ts` |
 | Positioning and camera geometry | `src/lib/photoPosition.ts` |
 | Adaptive images and cache | `src/components/AdaptivePhotoImage.tsx`, `src/lib/photoResolution.ts`, `imagePreloader.ts`, `photoVariantCache.ts`, `photoRevision.ts` |
 | Browser API client | `src/lib/api/photoApi.ts` |
